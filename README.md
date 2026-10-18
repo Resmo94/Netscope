@@ -42,12 +42,16 @@ chmod +x netscope.sh
 | `--ascii` | Uses plain ASCII instead of special symbols. |
 | `--version`, `--help` | Show the version or the help text. |
 
+
+## Quick start
+
 ### Installation
 
 Run this command in your terminal to install `netscope`:
 
 ```bash
 mkdir -p ~/.local/bin && curl -sSL [https://raw.githubusercontent.com/Resmo94/Netscope/main/netscope.sh](https://raw.githubusercontent.com/Resmo94/Netscope/main/netscope.sh) -o ~/.local/bin/netscope && chmod +x ~/.local/bin/netscope
+```
 
 ### Exit status
 
