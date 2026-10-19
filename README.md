@@ -32,14 +32,6 @@ chmod +x netscope.sh
 ./netscope.sh --json     # machine-readable output
 ```
 
-### Installation
-
-Run this command in your terminal to install `netscope`:
-
-```bash
-mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/Resmo94/Netscope/main/netscope.sh -o ~/.local/bin/netscope && chmod +x ~/.local/bin/netscope
-```
-
 | Option | What it does |
 |---|---|
 | *(none)* | Runs the check-up (about 5 seconds), shows the summary, then offers the advanced report. |
