@@ -79,6 +79,12 @@ NetScope's exit code reflects the health score, so other scripts can react to it
 - `--ascii` now produces pure ASCII everywhere, including the advanced report.
 - `--subnet` recognises the documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) as "documentation only".
 
+### What's new in 2.1
+
+- Wi-Fi signal and link rate fall back to NetworkManager and `iwconfig`, so drivers such as Broadcom `wl` no longer show `n/a`. Estimated values are marked with `~`.
+- Error counters now include CRC errors and drops. NetScope also checks whether they **grew during the scan**, so old totals from hours ago no longer cost points.
+- The direct DNS test uses `dig`'s own query time, which removes process start-up noise.
+- New `--json` output and exit codes.
 
 At the end of the summary, press **A** for the advanced details or **Enter** to finish.
 
