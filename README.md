@@ -1,4 +1,4 @@
-# NetScope 2.1: Network Health Console
+# NetScope 2.2: Network Health Console
 
 NetScope is a Bash script that checks every link between your computer and the internet and reports the result in plain language. It first shows a friendly summary. If you press **A**, it then shows a technical report with the raw numbers.
 
@@ -10,6 +10,7 @@ NetScope is a Bash script that checks every link between your computer and the i
 
 1. [Quick start](#quick-start)
 2. [How a run works](#how-a-run-works)
+   - [Learning tools (new in 2.2)](#learning-tools-new-in-22)
 3. [Part 1: The summary screen](#part-1-the-summary-screen)
 4. [Part 2: Advanced diagnostics](#part-2-advanced-diagnostics)
 5. [How the score is calculated](#how-the-score-is-calculated)
@@ -40,8 +41,14 @@ chmod +x netscope.sh
 | `--no-prompt`, `-n` | Never asks questions (useful in scripts). |
 | `--no-color` | Turns colours off. |
 | `--ascii` | Uses plain ASCII instead of special symbols. |
+| `--learn` | Adds a plain-language explanation of every step, using your own numbers. |
+| `--osi` | Shows your results on the seven OSI layers. |
+| `--subnet [CIDR]` | Subnet calculator. Uses your own address if you give none. |
+| `--dns DOMAIN` | DNS explorer. |
+| `--tls HOST[:PORT]` | TLS and certificate inspector. |
+| `--mtu [HOST]` | Path MTU discovery. |
+| `--glossary [TERM]` | Networking glossary, optionally filtered. |
 | `--version`, `--help` | Show the version or the help text. |
-
 
 ## Quick start
 
@@ -65,12 +72,13 @@ NetScope's exit code reflects the health score, so other scripts can react to it
 | `1` | NetScope could not run (for example `ip` is missing). |
 | `2` | Bad command-line option. |
 
-### What's new in 2.1
+### What's new in 2.2
 
-- Wi-Fi signal and link rate fall back to NetworkManager and `iwconfig`, so drivers such as Broadcom `wl` no longer show `n/a`. Estimated values are marked with `~`.
-- Error counters now include CRC errors and drops. NetScope also checks whether they **grew during the scan**, so old totals from hours ago no longer cost points.
-- The direct DNS test uses `dig`'s own query time, which removes process start-up noise.
-- New `--json` output and exit codes.
+- Seven read-only **learning tools** for people studying networking: `--learn`, `--osi`, `--subnet`, `--dns`, `--tls`, `--mtu` and `--glossary` (see [Learning tools](#learning-tools-new-in-22)).
+- If the internet is unreachable the score is now capped at 45 (POOR, exit code 20). Before, a machine with a healthy link but no internet could still score 55.
+- `--ascii` now produces pure ASCII everywhere, including the advanced report.
+- `--subnet` recognises the documentation ranges (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24) as "documentation only".
+
 
 At the end of the summary, press **A** for the advanced details or **Enter** to finish.
 
@@ -93,6 +101,38 @@ Scan (~5 s)  →  Summary screen  →  [A] Advanced diagnostics  →  Done
 1. **Scan.** NetScope pings the router and public DNS servers, resolves a few domains, makes an HTTPS request, reads the interface counters, and traces the route.
 2. **Summary.** The results are translated into a journey diagram, a few key metrics, a "what you can do" table, and one health score.
 3. **Advanced (optional).** The same data is shown in full technical detail.
+
+---
+
+## Learning tools (new in 2.2)
+
+These modes explain networking concepts using your own network. They are read-only. They run, print, and exit without the normal scan (except `--learn` and `--osi`, which are added to the normal report). None of them changes the score, the exit code or the `--json` output of a normal run.
+
+| Command | Concept it teaches | What you see |
+|---|---|---|
+| `./netscope.sh --learn` | The path of a packet, layer by layer | After the summary, one explanation per step (adapter, Wi-Fi or cable, router, internet, websites) filled in with your IP, signal, gateway, latency and DNS time, plus the raw Linux command behind each ("Try it"). |
+| `./netscope.sh --osi` | The OSI model | Seven rows from Application (7) down to Physical (1), each marked OK, WARN or FAIL, with the measurement behind it. It names the lowest layer with a problem, because a fault there breaks everything above it. |
+| `./netscope.sh --subnet [CIDR]` | Subnetting, netmasks, local vs remote | Network and broadcast address, usable host range, number of hosts and address type. It then shows the **binary AND** of address and mask, tests whether your gateway and 1.1.1.1 are local or remote, and prints a prefix cheat sheet. |
+| `./netscope.sh --dns example.com` | How DNS works | The same query asked twice (cache effect), the A, AAAA, CNAME, MX, NS, TXT and SOA records with TTLs, a reverse lookup, and a `dig +trace` walk from the root servers down. Needs `dig`. |
+| `./netscope.sh --tls example.com` | TLS and certificates | Protocol and cipher, certificate subject, issuer, expiry (days left), names it is valid for, chain length, and whether your computer trusts it. A self-signed or expiring certificate is flagged. Needs `openssl`. |
+| `./netscope.sh --mtu [HOST]` | MTU and fragmentation | A binary search with Do-Not-Fragment pings, printed step by step, ending in the path MTU. It recognises 1500 (normal Ethernet) and 1492 (PPPoE) and explains smaller values (VPNs, tunnels). Needs `ping`; the host must answer ping. |
+| `./netscope.sh --glossary [TERM]` | Vocabulary | About 36 terms (ARP, NAT, TTL, MTU, TCP, UDP, jitter and more), each tagged with its OSI layer. Give a word to search, for example `--glossary tcp`. |
+
+Examples:
+
+```bash
+./netscope.sh --subnet                      # your own network
+./netscope.sh --subnet 172.16.5.9/20        # any network
+./netscope.sh --learn --osi                 # explanations plus the layer view
+./netscope.sh --dns example.com
+./netscope.sh --tls example.com:443
+./netscope.sh --mtu 8.8.8.8
+./netscope.sh --glossary nat
+```
+
+> **Reading `--subnet`:** the number after the slash is how many leading bits are the network part. The mask has 1s for those bits and 0s for the host bits. Address AND mask gives the network address. Two computers can talk directly when their results match; otherwise traffic goes through the gateway.
+
+> **Reading `--osi`:** a FAIL at layer 3 while layers 1 and 2 are OK means the cable or Wi-Fi works and the router is reachable, but IP traffic does not get through to the internet. Look at your provider or router uplink.
 
 ---
 
@@ -354,7 +394,7 @@ Typical deductions (all defined in the script):
 | Problem | Points |
 |---|---|
 | No adapter / no IP address / no default route | 30 / 25 / 25 |
-| Internet unreachable | 25 |
+| Internet unreachable | 25, and the score is capped at 45 |
 | Wi-Fi not connected, cable unplugged, or link down | 20 |
 | Captive portal (sign-in page) suspected | 20 |
 | DNS not working / partly failing / slow | 20 / 8 / 4 |
@@ -435,6 +475,15 @@ That is current traffic through your interface while idle, not your connection s
 **Why does it say 100/100 when there are dropped packets?**
 Drops are counted since boot and are a very small share of traffic. The score is based on live tests (latency, loss, DNS, HTTPS, routing) and on errors that appear **during** the scan. Old totals are shown in the report but do not cost points.
 
+**Which learning tool should I start with?**
+Run `./netscope.sh --learn --osi` once on your own network, then `./netscope.sh --subnet` to see how your address is split into network and host parts. Use `--glossary` whenever a term is unfamiliar.
+
+**Do the learning tools send anything unusual?**
+No. `--dns` sends ordinary DNS queries, `--tls` makes one TLS connection to the host you name, and `--mtu` sends pings. `--subnet` and `--glossary` send nothing. None of them scans other devices or probes ports.
+
+**Why does `--mtu` say the host does not answer ping?**
+Some servers and firewalls ignore ICMP. Try another host such as 8.8.8.8.
+
 **Can I use NetScope in another script?**
 Yes. Use `./netscope.sh --json` for the data and check the exit code (0, 10 or 20) for a quick verdict. The JSON does not include your public IP.
 
@@ -449,4 +498,4 @@ It only contacts standard test targets (the router, public DNS servers, and a Cl
 
 ---
 
-*NetScope 2.1 · Page last updated 2026-10-18*
+*NetScope 2.2 · Page last updated 2026-10-19*
