@@ -1,4 +1,4 @@
-# NetScope 2.2: Network Health Console
+# NetScope 2.3: Network Health Console
 
 NetScope is a Bash script that checks every link between your computer and the internet and reports the result in plain language. It first shows a friendly summary. If you press **A**, it then shows a technical report with the raw numbers.
 
@@ -10,7 +10,8 @@ NetScope is a Bash script that checks every link between your computer and the i
 
 1. [Quick start](#quick-start)
 2. [How a run works](#how-a-run-works)
-   - [Learning tools (new in 2.2)](#learning-tools-new-in-22)
+   - [Learning tools (introduced in 2.2)](#learning-tools-introduced-in-22)
+   - [Packet walk-through (new in 2.3)](#packet-walk-through-new-in-23)
 3. [Part 1: The summary screen](#part-1-the-summary-screen)
 4. [Part 2: Advanced diagnostics](#part-2-advanced-diagnostics)
 5. [How the score is calculated](#how-the-score-is-calculated)
@@ -31,6 +32,14 @@ chmod +x netscope.sh
 ./netscope.sh --json     # machine-readable output
 ```
 
+### Installation
+
+Run this command in your terminal to install `netscope`:
+
+```bash
+mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/Resmo94/Netscope/main/netscope.sh -o ~/.local/bin/netscope && chmod +x ~/.local/bin/netscope
+```
+
 | Option | What it does |
 |---|---|
 | *(none)* | Runs the check-up (about 5 seconds), shows the summary, then offers the advanced report. |
@@ -41,6 +50,7 @@ chmod +x netscope.sh
 | `--no-prompt`, `-n` | Never asks questions (useful in scripts). |
 | `--no-color` | Turns colours off. |
 | `--ascii` | Uses plain ASCII instead of special symbols. |
+| `--walk DEST` | Explains how a packet would travel to a hostname or IPv4 address, hop by hop. |
 | `--learn` | Adds a plain-language explanation of every step, using your own numbers. |
 | `--osi` | Shows your results on the seven OSI layers. |
 | `--subnet [CIDR]` | Subnet calculator. Uses your own address if you give none. |
@@ -49,16 +59,6 @@ chmod +x netscope.sh
 | `--mtu [HOST]` | Path MTU discovery. |
 | `--glossary [TERM]` | Networking glossary, optionally filtered. |
 | `--version`, `--help` | Show the version or the help text. |
-
-## Quick start
-
-### Installation
-
-Run this command in your terminal to install `netscope`:
-
-```bash
-mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/Resmo94/Netscope/main/netscope.sh -o ~/.local/bin/netscope && chmod +x ~/.local/bin/netscope
-```
 
 ### Exit status
 
@@ -71,6 +71,14 @@ NetScope's exit code reflects the health score, so other scripts can react to it
 | `20` | Poor (score below 55). |
 | `1` | NetScope could not run (for example `ip` is missing). |
 | `2` | Bad command-line option. |
+
+### What's new in 2.3
+
+- New **`--walk DEST` packet walk-through** explains how Linux sends traffic to a destination, using your actual IPv4 address, netmask, route, next-hop MAC and (where available) traceroute hops.
+- The walk-through demonstrates local-versus-remote decisions, ARP/neighbour lookup, link-layer MAC changes, IP addresses, TTL decrement and common home-router NAT behaviour.
+- Improved interface selection distinguishes physical adapters, VPN interfaces and virtual/container interfaces more deliberately. Advanced Wi-Fi details can include transmit retries, failed transmissions and expected throughput when the driver exposes them.
+- The advanced latency report can include a ping test to `1.1.1.1` under load. `--speed` now reports download/upload results and a bufferbloat grade when those measurements are available.
+- The script's help now documents the packet walk-through and its network contacts, including that the optional speed test uses Cloudflare test data.
 
 ### What's new in 2.2
 
@@ -110,7 +118,7 @@ Scan (~5 s)  →  Summary screen  →  [A] Advanced diagnostics  →  Done
 
 ---
 
-## Learning tools (new in 2.2)
+## Learning tools (introduced in 2.2)
 
 These modes explain networking concepts using your own network. They are read-only. They run, print, and exit without the normal scan (except `--learn` and `--osi`, which are added to the normal report). None of them changes the score, the exit code or the `--json` output of a normal run.
 
@@ -139,6 +147,45 @@ Examples:
 > **Reading `--subnet`:** the number after the slash is how many leading bits are the network part. The mask has 1s for those bits and 0s for the host bits. Address AND mask gives the network address. Two computers can talk directly when their results match; otherwise traffic goes through the gateway.
 
 > **Reading `--osi`:** a FAIL at layer 3 while layers 1 and 2 are OK means the cable or Wi-Fi works and the router is reachable, but IP traffic does not get through to the internet. Look at your provider or router uplink.
+
+---
+
+## Packet walk-through (new in 2.3)
+
+Run:
+
+```bash
+./netscope.sh --walk 8.8.8.8
+./netscope.sh --walk example.com
+```
+
+This is a teaching mode, not a packet capture. NetScope asks Linux how it would route traffic to the destination and combines that answer with your local address, subnet mask, neighbour table and (if installed) `tracepath` or `traceroute`. It is designed to show the decisions and header changes, not to capture or inspect the contents of real application packets.
+
+### What the steps mean
+
+1. **Resolve the destination.** A hostname is resolved to an IPv4 address. You can give an IPv4 address directly.
+2. **Identify your interface.** The route lookup (`ip route get DEST`) tells NetScope which interface and source address Linux would use.
+3. **Apply the subnet mask.** NetScope performs a bitwise AND on your address and the destination. Matching network portions suggest the destination is local; different portions usually mean remote. The actual kernel route still takes precedence, for example when a VPN or a more-specific route is involved.
+4. **Choose the next hop.** For a remote destination, the next hop is usually your router. The IP packet remains addressed to the final destination, while the local frame is addressed to the next hop.
+5. **Find the next-hop MAC.** On Ethernet/Wi-Fi links, NetScope checks the neighbour table. If there is no entry, it may send **one ping to the next hop** to prompt neighbour discovery/ARP. VPN point-to-point tunnels do not have an Ethernet MAC in the same way.
+6. **Build the outgoing frame.** The report compares the link-layer MAC addresses with the end-to-end IP addresses and shows the initial TTL.
+7. **Follow router hops.** If `tracepath` or `traceroute` is installed and probes get replies, NetScope illustrates each discovered hop and the TTL reduction.
+
+### The key idea: MAC, IP and TTL
+
+| Item | Normally changes at each router? | Why |
+|---|---|---|
+| **Source/destination MAC** | Yes, on each Ethernet/Wi-Fi link | A router removes the incoming link-layer frame and creates a new one for the next link. |
+| **Source/destination IP** | Usually no | The IP packet is addressed end-to-end. Network Address Translation (NAT), commonly performed by a home router, can rewrite the private source IP. |
+| **TTL** | Yes; reduced by one at each IP router | It prevents packets circulating forever. A packet is discarded when its TTL expires. |
+
+### Important limitations
+
+- `--walk` currently resolves and traces **IPv4** destinations. An IPv6-only destination is not supported by this mode.
+- It does not capture a real packet or guarantee every displayed hop will answer. Firewalls and routers commonly suppress traceroute probes.
+- The router-by-router explanation is a model based on the route and hops that can be observed. Intermediate MAC addresses are illustrative placeholders; NetScope cannot learn the MAC addresses on remote links from your computer.
+- NAT is inferred from a private/shared source address and a public destination; the actual translation is not directly inspected.
+- If `tracepath` and `traceroute` are both missing, the local routing, subnet and next-hop explanation still runs, but the remote hops cannot be listed.
 
 ---
 
@@ -283,6 +330,8 @@ The `▸` marker shows the interface that carries your default route.
 | Signal | Received signal strength in dBm. Closer to 0 is stronger: about -50 is excellent, -67 is good, -70 or lower is weak. |
 | Link rate (tx / rx) | Negotiated speed between your device and the access point. This is the link speed, not your internet speed. |
 | Power saving | Whether the Wi-Fi card is allowed to sleep between packets. Turning it off can reduce latency spikes on some systems. |
+| Expected throughput | A driver-provided estimate of achievable Wi-Fi throughput, when available. It is not a speed-test result. |
+| Transmit retries / failed | Frames the Wi-Fi adapter had to retry or could not send, if the driver reports these counters. Elevated values can indicate interference, weak signal or congestion. |
 | Security | Encryption type (e.g. WPA2). |
 | Neighbours on channel | How many other networks share your channel. More neighbours means more interference. This comes from a cached scan, so it can be out of date. |
 
@@ -326,7 +375,7 @@ Three targets show where a problem sits:
 | **Cloudflare 1.1.1.1** | Path to the internet, via your ISP. |
 | **Google 8.8.8.8** | A second internet reference point. |
 
-If the router is fast and the others are slow, the issue is outside your home. If the router itself is slow or lossy, the issue is your Wi-Fi.
+If the router is fast and the others are slow, the issue may be outside your home. If the router itself is slow or lossy, investigate the local link first. The optional **under-load** ping helps show whether latency rises while the connection is busy.
 
 **Rough guide:**
 
@@ -336,7 +385,17 @@ If the router is fast and the others are slow, the issue is outside your home. I
 | Jitter | under 5 ms | 5 to 20 ms | over 20 ms |
 | Packet loss | 0% | under 1% | over 2% |
 
-### 2.9 Web / TLS timing and public address
+### 2.9 Speed test and bufferbloat (when `--speed` is used)
+
+The optional speed test contacts `speed.cloudflare.com` to measure download and upload throughput. It also compares latency while idle with latency under load and may assign a **bufferbloat grade**.
+
+- **Download / upload:** a short, single-server estimate of throughput, not a guaranteed line rate.
+- **Loaded latency:** latency measured while the connection is busy.
+- **Bufferbloat:** excessive delay that appears when network queues fill during heavy uploads or downloads. A large increase in latency under load can make video calls and gaming feel laggy even when the speed test looks fast.
+
+The test transfers data over the internet. On very fast connections it may download/upload a substantial amount of test data (the script help notes up to roughly 130 MB). Use it intentionally if you have a metered or constrained connection.
+
+### 2.10 Web / TLS timing and public address
 
 One HTTPS request is broken into stages. Each time is **cumulative**, so every row includes the ones above it.
 
@@ -356,7 +415,7 @@ Also shown:
 
 Your public IP is shown on screen. Remove it before sharing a report publicly.
 
-### 2.10 Route to 1.1.1.1 (tracepath)
+### 2.11 Route to 1.1.1.1 (tracepath)
 
 Lists each router hop between you and the destination, with timing. It also shows the path MTU (`pmtu`).
 
@@ -365,7 +424,7 @@ Lists each router hop between you and the destination, with timing. It also show
 - Hops in private ranges (`172.16-31.x.x`, `10.x.x.x`) are usually your ISP's internal network.
 - **`no reply` hops are common**, because many routers hide themselves. Only the last hops matter for reachability.
 
-### 2.11 TCP / UDP / IP statistics
+### 2.12 TCP / UDP / IP statistics
 
 System-wide totals since boot:
 
@@ -378,7 +437,7 @@ System-wide totals since boot:
 | IP in / discards | IP packets received, and discarded. |
 | Socket summary (`ss`) | Totals for open sockets by protocol. |
 
-### 2.12 NetworkManager
+### 2.13 NetworkManager
 
 NetworkManager's own view: the list of connection profiles, the **overall state** (`connected`), and **connectivity** (`full` means internet access was confirmed; `limited` or `portal` indicates a problem or a login page).
 
@@ -466,7 +525,7 @@ The sample run (made with NetScope 2.0) scored 100/100. Two details were worth n
 - Ping failures alone do not prove a fault: routers and servers may ignore ICMP.
 - Counters (bytes, errors, drops, retransmits) are **cumulative since boot**, not per-second.
 - Traffic rates describe this computer's interface, not your provider's maximum speed.
-- NetScope never scans other devices, tests open ports, or changes any configuration.
+- NetScope does not scan other devices, test open ports, or change configuration. Most checks are read-only; `--walk` may send one ping to the next hop if its MAC address is not already in the neighbour table, and `--speed` transfers test data to Cloudflare.
 - The neighbouring-networks count comes from a cached scan and may be stale.
 - Results are a snapshot. Run it a few times, at different moments, before drawing conclusions.
 - Targets (1.1.1.1, 8.8.8.8, Cloudflare) need outbound access. A firewall or restricted network can make them look like failures.
@@ -474,6 +533,18 @@ The sample run (made with NetScope 2.0) scored 100/100. Two details were worth n
 ---
 
 ## FAQ
+
+**What does `--walk` actually do?**
+
+It asks Linux for the route to a destination, shows the subnet calculation and next hop, checks the neighbour table for the next-hop MAC, and uses `tracepath` or `traceroute` if available. If the neighbour entry is missing, it may send one ping to the next hop. It does not capture packet contents or scan the network.
+
+**Why do some MAC addresses in `--walk` look like placeholders?**
+
+Your computer normally knows the MAC addresses only for devices on its directly connected link. Remote routers' link-layer addresses are not visible from your computer, so the walk-through uses explanatory placeholders for those links.
+
+**Does `--speed` use a lot of data?**
+
+It contacts `speed.cloudflare.com` and transfers test data. The amount depends on connection speed; the script help warns that very fast connections may use up to roughly 130 MB.
 
 **Why is my download only 26 kbps?**
 That is current traffic through your interface while idle, not your connection speed. Run `./netscope.sh --speed`.
@@ -504,4 +575,4 @@ It only contacts standard test targets (the router, public DNS servers, and a Cl
 
 ---
 
-*NetScope 2.2 · Page last updated 2026-10-19*
+*NetScope 2.3 · Page last updated 2026-10-19*
