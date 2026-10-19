@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-#  NetScope 2.1 — a friendly network health console for Linux Mint
+#  NetScope 2.3 — a friendly network health console for Linux Mint
 #  (also works on other Ubuntu / Debian based desktops)
 #
 #  • Simple view   : plain-English verdict, a "journey of your data" map,
@@ -13,6 +13,21 @@
 #
 #  Run  ./netscope.sh --help  to see all options.
 #
+#  What's new in 2.3
+#   - --walk DEST  follow one packet to a name or IP, step by step with your real
+#                  addresses: AND with the netmask, local or remote, next hop
+#                  (ip route get), the next hop's MAC (ARP / ip neigh), then what
+#                  changes at every router (new MACs, same IPs, TTL minus one)
+#
+#  What's new in 2.2  (tools for learning networking)
+#   - --learn     explains every step of the journey using your own numbers
+#   - --osi       your results laid out on the seven OSI layers
+#   - --subnet    subnet calculator with binary working
+#   - --dns       DNS explorer: caching, record types, reverse DNS, full trace
+#   - --tls       TLS / certificate inspector
+#   - --mtu       path MTU discovery with a visible binary search
+#   - --glossary  plain-language networking glossary
+#
 #  What's new in 2.1
 #   - Wi-Fi signal / link rate fall back to NetworkManager and iwconfig, so
 #     drivers that hide them from `iw` (e.g. Broadcom "wl") no longer show n/a.
@@ -24,7 +39,7 @@
 
 set -u
 
-VERSION="2.1"
+VERSION="2.3"
 
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
   echo "NetScope needs bash 4.4 or newer." >&2
@@ -61,6 +76,16 @@ NetScope - a friendly network health console
   ./netscope.sh --version     Show the version
   ./netscope.sh --help        Show this help
 
+LEARNING TOOLS  (all read-only)
+  ./netscope.sh --walk DEST        Follow one packet to DEST (name or IPv4), hop by hop
+  ./netscope.sh --learn            Add a plain-language explanation of every step
+  ./netscope.sh --osi              Show your results on the seven OSI layers
+  ./netscope.sh --subnet [CIDR]    Subnet calculator (your own network if no CIDR given)
+  ./netscope.sh --dns DOMAIN       Explore DNS: caching, record types, reverse DNS, trace
+  ./netscope.sh --tls HOST[:PORT]  Inspect a TLS connection and certificate
+  ./netscope.sh --mtu [HOST]       Find the path MTU with Do-Not-Fragment pings
+  ./netscope.sh --glossary [TERM]  Explain networking terms
+
 EXIT STATUS
   0  healthy (score 75 or more)      10  needs attention (55 - 74)
   20 poor (below 55)                  1  NetScope could not run
@@ -86,7 +111,16 @@ USAGE
 
 # ── Options ───────────────────────────────────────────────────────────────────
 ADVANCED=0; PROMPT=1; SPEED=0; LIVE=0; JSON=0; OPT_NOCOLOR=0; OPT_ASCII=0
-for arg in "$@"; do
+LEARN=0; OSI=0; MODE=""; MODE_ARG=""; OPT_VAL=""
+take_arg() {   # take_arg "$1": succeeds when $1 is a value (not another option)
+  if [[ -n "${1:-}" && "${1:0:1}" != - ]]; then OPT_VAL="$1"; return 0; fi
+  OPT_VAL=""; return 1
+}
+need_arg() {   # need_arg "--dns" "a domain, e.g. --dns example.com" "$1"
+  if ! take_arg "${3:-}"; then printf '%s needs %s\n' "$1" "$2" >&2; exit 2; fi
+}
+while (( $# )); do
+  arg="$1"; shift
   case "$arg" in
     -a|--advanced)          ADVANCED=1 ;;
     -s|--speed)             SPEED=1 ;;
@@ -95,6 +129,14 @@ for arg in "$@"; do
     -n|--no-prompt)         PROMPT=0 ;;
     --no-color|--no-colour) OPT_NOCOLOR=1 ;;
     --ascii)                OPT_ASCII=1 ;;
+    --learn)                LEARN=1 ;;
+    --osi)                  OSI=1 ;;
+    --walk)                 MODE=walk;     need_arg --walk "a destination, for example: --walk 8.8.8.8" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
+    --subnet)               MODE=subnet;   take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --mtu)                  MODE=mtu;      take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --glossary)             MODE=glossary; take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --dns)                  MODE=dns;      need_arg --dns "a domain, for example: --dns example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
+    --tls)                  MODE=tls;      need_arg --tls "a host, for example: --tls example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
     -V|--version)           echo "NetScope $VERSION"; exit 0 ;;
     -h|--help)              usage; exit 0 ;;
     *) printf 'Unknown option: %s\n\n' "$arg" >&2; usage >&2; exit 2 ;;
@@ -976,6 +1018,8 @@ evaluate() {
     elif (( DL_I >= 0 && DL_I < 10 )); then penalize 4  "Download speed is low (${DL_MBPS} Mbps)"; fi
     [[ -n "$BLOAT_MS" ]] && (( BLOAT_MS > 200 )) && penalize 4 "Delay jumps by ${BLOAT_MS} ms when the line is busy"
   fi
+  # No internet is never "fine", whatever else is healthy (router, link, DNS cache...).
+  if [[ "$INTERNET" == FAIL ]] && (( SCORE > 45 )); then penalize $(( SCORE - 45 )) "Internet is unreachable, so the score is capped at 45"; fi
   (( SCORE < 0 )) && SCORE=0
   (( SCORE > 100 )) && SCORE=100
 
@@ -1081,7 +1125,7 @@ make_tips() {
   elif (( ! HAS_IP )); then
     add_tip "You are linked to the network but got no address. Disconnect and reconnect from the network icon, or restart your router."
   fi
-  (( PORTAL )) && add_tip "Open your web browser: hotel, café and train Wi-Fi usually shows a sign-in page first."
+  (( PORTAL )) && add_tip "Open your web browser: hotel, cafe and train Wi-Fi usually shows a sign-in page first."
   (( WIFI_WEAK )) && add_tip "Move closer to the router or away from thick walls. The 5 GHz network is faster; 2.4 GHz reaches further."
   if [[ "${N_STATE[3]}" == FAIL || "${N_STATE[3]}" == WARN ]]; then
     add_tip "Restart your router: unplug it for 30 seconds, then plug it back in and wait two minutes."
@@ -1308,8 +1352,8 @@ adv_checklist() {
   if (( HAS_IP )); then show_check OK "Device address" "${ADDR4:--}${ADDR6:+  |  $ADDR6}"; else show_check FAIL "Device address" "no global IPv4/IPv6 address"; fi
   if (( HAS_ROUTE )); then show_check OK "Default route" "$ROUTE_FAMILY via ${GATEWAY:-direct} dev $IFACE"; else show_check FAIL "Default route" "none"; fi
   st="${N_STATE[3]}"; word="${N_WORD[3]}"
-  if (( ${PG[gw.n]:-0} > 0 )); then show_check "$st" "Router (gateway)" "$word — ${PG[gw.recv]}/${PG[gw.sent]} replies, avg ${PG[gw.avg]} ms"
-  else show_check "$st" "Router (gateway)" "$word$( (( GW_INFERRED )) && echo ' — ping blocked, but traffic passes')"; fi
+  if (( ${PG[gw.n]:-0} > 0 )); then show_check "$st" "Router (gateway)" "$word - ${PG[gw.recv]}/${PG[gw.sent]} replies, avg ${PG[gw.avg]} ms"
+  else show_check "$st" "Router (gateway)" "$word$( (( GW_INFERRED )) && echo ' - ping blocked, but traffic passes')"; fi
   if (( DNS_TOTAL > 0 )); then show_check "${N_STATE[5]}" "DNS lookups" "$DNS_OKN/$DNS_TOTAL succeeded, avg ${DNS_AVG} ms, slowest ${DNS_MAX} ms"; else show_check INFO "DNS lookups" "not tested"; fi
   case "$INTERNET" in
     OK) show_check OK "Internet (HTTPS)" "HTTP $H_CODE in ${H_TOTAL} ms${INET_VIA:+ (reached via $INET_VIA)}" ;;
@@ -1328,7 +1372,7 @@ adv_checklist() {
   case "$PORTAL_CODE" in
     204) show_check OK "Sign-in page check" "none (HTTP 204)" ;;
     ""|000) show_check INFO "Sign-in page check" "inconclusive" ;;
-    *) if (( PORTAL )); then show_check WARN "Sign-in page check" "HTTP $PORTAL_CODE — likely a captive portal"; else show_check INFO "Sign-in page check" "HTTP $PORTAL_CODE (ignored: web test succeeded)"; fi ;;
+    *) if (( PORTAL )); then show_check WARN "Sign-in page check" "HTTP $PORTAL_CODE - likely a captive portal"; else show_check INFO "Sign-in page check" "HTTP $PORTAL_CODE (ignored: web test succeeded)"; fi ;;
   esac
   if (( IPV6_OK )); then show_check OK "IPv6" "works end-to-end (${IPV6_ADDR:-address hidden})"; else show_check INFO "IPv6" "not available on this network (common, not a fault)"; fi
 }
@@ -1541,7 +1585,7 @@ adv_speed() {
   kv "Download" "${DL_MBPS:-failed} Mbps"
   kv "Upload" "${UL_MBPS:-failed} Mbps"
   if [[ -n "$BLOAT_MS" ]]; then
-    kv "Latency idle → loaded" "${LAT_MS} ms → ${LOAD_AVG} ms (+${BLOAT_MS} ms)"
+    kv "Latency idle to loaded" "${LAT_MS} ms to ${LOAD_AVG} ms (+${BLOAT_MS} ms)"
     kv "Bufferbloat grade" "$BLOAT_GRADE"
   fi
   note "Single-server test, short duration: a good indication, not a lab measurement."
@@ -1574,10 +1618,10 @@ render_advanced() {
   adv_speed
   adv_score
   sub "Notes"
-  note "• Ping failures alone do not prove a fault: routers and servers may ignore ICMP."
-  note "• Counters (bytes, errors, drops, retransmits) are cumulative since boot, not per-second."
-  note "• Traffic rates describe this computer's interface, not your provider's maximum speed."
-  note "• NetScope never scans other devices, tests open ports or changes any configuration."
+  note "$G_INFO Ping failures alone do not prove a fault: routers and servers may ignore ICMP."
+  note "$G_INFO Counters (bytes, errors, drops, retransmits) are cumulative since boot, not per-second."
+  note "$G_INFO Traffic rates describe this computer's interface, not your provider's maximum speed."
+  note "$G_INFO NetScope never scans other devices, tests open ports or changes any configuration."
 }
 
 
@@ -1685,7 +1729,7 @@ live_mode() {
     sig=""
     if [[ "$LAN_TYPE" == wifi ]] && have iw; then
       sig="$(iw dev "$LAN_IF" link 2>/dev/null | awk '/signal:/ { print $2; exit }')"
-      [[ -n "$sig" ]] && sig="  ·  signal ${sig} dBm"
+      [[ -n "$sig" ]] && sig="  $G_MID  signal ${sig} dBm"
     fi
     printf '\033[H'
     printf '  %sNETSCOPE LIVE%s  %s%s%s%s%s\033[K\n' "$BOLD$CYAN" "$RESET" "$GRAY" "$title" "$sig" "$RESET" ""
@@ -1705,6 +1749,733 @@ live_mode() {
 }
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  LEARNING TOOLS — explain what the numbers mean and let you explore
+#  Read-only: they look at your own computer or make ordinary DNS / HTTPS /
+#  ping requests, exactly like a browser or the `ping` command would.
+# ══════════════════════════════════════════════════════════════════════════════
+wrap() {   # wrap "text" [colour]
+  local ln c="${2:-}"
+  while IFS= read -r ln; do
+    ln="${ln%"${ln##*[![:space:]]}"}"
+    printf '  %s%s%s\n' "$c" "$ln" "$RESET"
+  done < <(fold -s -w "$(( W - 4 ))" <<<"$1")
+}
+try_cmd() { printf '  %s%s Try it:%s %s%s%s\n' "$GRAY" "$G_ARROW" "$RESET" "$CYAN" "$1" "$RESET"; }
+lblock()  {   # title layers text
+  printf '\n  %s%s%s  %s[%s]%s\n' "$BOLD$WHITE" "$1" "$RESET" "$MAGENTA" "$2" "$RESET"
+  wrap "$3"
+}
+
+# ── --learn: plain-language explanation of every step, with your own numbers ──
+render_learn() {
+  local gwavg="${PG[gw.avg]:-}" sig lat_txt
+  section "LEARN: WHAT EACH STEP MEANS"
+  wrap "Networks are built in layers, and each layer depends on the one below it. That is why NetScope checks your journey in order: if an early step is broken, every step after it fails too."
+
+  lblock "1. YOU: adapter and IP address" "layers 1-3" \
+    "Your computer needs a network adapter and an IP address, its identity on the network. ${LAN_IF:-Your adapter} has ${ADDR4:-no IPv4 address}. Home routers hand these out automatically using DHCP. The number after the slash (the prefix) says how many bits belong to the network part, which tells your computer which addresses are on the same local network."
+  try_cmd "ip -br address"
+  try_cmd "./netscope.sh --subnet"
+
+  if [[ "$LAN_TYPE" == wifi ]]; then
+    sig="not reported by the driver"
+    [[ -n "$WIFI_SIGNAL" ]] && sig="${WIFI_SIGNAL} dBm"
+    lblock "2. WI-FI: the radio link" "layers 1-2" \
+      "Wi-Fi is a radio link between your computer and the access point. On this link, data travels in frames addressed by MAC (hardware) address, not by IP address. You are on ${WIFI_BAND:-an unknown band}, channel ${WIFI_CHAN:-?}, with a signal of ${sig}. dBm is a logarithmic scale: -70 dBm carries 100 times less power than -50 dBm. The 5 GHz band is faster but reaches less far than 2.4 GHz."
+    try_cmd "iw dev ${LAN_IF:-wlan0} link"
+    try_cmd "nmcli device wifi list"
+  else
+    lblock "2. CABLE: the physical link" "layers 1-2" \
+      "A wired link carries electrical or optical signals on a cable, grouped into Ethernet frames addressed by MAC (hardware) address. If the carrier is up, the cable and the port at both ends are working."
+    try_cmd "ip -s link show ${LAN_IF:-eth0}"
+    try_cmd "ethtool ${LAN_IF:-eth0}"
+  fi
+
+  lblock "3. ROUTER: the way out" "layer 3, with ARP on layer 2" \
+    "Anything outside your local network is sent to the default gateway, which is your router. Your computer first finds the router's MAC address with ARP, then hands it the packet. Your gateway is ${GATEWAY:-unknown}${gwavg:+ and it answered in ${gwavg} ms}. A fast, steady reply means the local link is healthy."
+  try_cmd "ip route"
+  try_cmd "ip neigh"
+  try_cmd "./netscope.sh --walk 8.8.8.8"
+  [[ -n "$GATEWAY" ]] && try_cmd "ping -c 4 $GATEWAY"
+
+  lat_txt=""; [[ -n "$LAT_MS" ]] && lat_txt="Your reply time was ${LAT_MS} ms to ${PUB_TARGET:-the internet}."
+  lblock "4. INTERNET: beyond your home" "layer 3" \
+    "Ping sends ICMP echo packets. Pinging a public IP address instead of a name tests routing and your provider without involving DNS. Every router that forwards a packet lowers its TTL by one, and when the TTL reaches zero that router sends back an error. This is how tracepath maps the route. ${lat_txt}"
+  try_cmd "ping -c 4 1.1.1.1"
+  try_cmd "tracepath -n 1.1.1.1"
+  try_cmd "./netscope.sh --mtu"
+
+  lblock "5. WEBSITES: names, then HTTPS" "layers 4-7" \
+    "People use names, computers use IP addresses, and DNS translates between them (usually over UDP port 53). Then your browser opens a TCP connection with a three-way handshake (SYN, SYN-ACK, ACK), sets up TLS encryption, and finally sends the HTTP request. Your name lookups averaged ${DNS_AVG} ms and one full HTTPS request took ${H_TOTAL:-?} ms."
+  try_cmd "dig example.com"
+  try_cmd "curl -v -o /dev/null https://example.com"
+  try_cmd "./netscope.sh --dns example.com"
+  try_cmd "./netscope.sh --tls example.com"
+
+  lblock "Troubleshooting from the bottom up" "method" \
+    "Test one step at a time. Can you ping your router? Can you ping 1.1.1.1? Can you ping example.com? The first 'no' shows where the fault is: no reply from the router points to the local link, a working 1.1.1.1 with a failing name points to DNS, and working pings with a failing website point to TLS, a firewall or the website itself."
+
+  lblock "Your three quality numbers" "performance" \
+    "Latency is the round-trip time (${LAT_MS:-?} ms for you). Jitter is how much that time varies (${JIT_MS:-?} ms). Packet loss is the share of packets that never arrive (${LOSS_PCT:-?}%). Calls and games care more about jitter and loss than about raw speed, which is why a fast connection can still feel bad."
+  printf '\n'
+  note "More to explore: --walk DEST  --osi  --subnet  --dns DOMAIN  --tls HOST  --mtu  --glossary TERM"
+}
+
+# ── --osi: your results laid out on the seven OSI layers ─────────────────────
+norm()  { if [[ "$1" == UNK ]]; then printf INFO; else printf '%s' "$1"; fi; }
+worst() {   # worst state of the arguments
+  local s w=OK u=0 n=0
+  for s in "$@"; do
+    n=$(( n + 1 ))
+    case "$s" in FAIL) printf FAIL; return ;; WARN) w=WARN ;; UNK) u=$(( u + 1 )) ;; esac
+  done
+  (( u == n )) && w=INFO
+  printf '%s' "$w"
+}
+osi_row() {   # layer name description state
+  local st pad
+  st="$(norm "$4")"; pad=$(( 8 - (4 + ${#st}) )); (( pad < 0 )) && pad=0
+  printf '  %s%s%s  %-13s %s%*s  %s\n' "$BOLD" "$1" "$RESET" "$2" "$(mark_state "$st")" "$pad" "" "$3"
+}
+
+render_osi() {
+  local tls="" tcp_ms="" out rt pct inet_state i first=0 mac
+  local -a LS=() LD=()
+  local names=("" "Physical" "Data link" "Network" "Transport" "Session" "Presentation" "Application")
+  [[ -n "$H_FROM" ]] && tls="$(trace_field "$H_FROM" tls)"
+  case "$INTERNET" in OK) inet_state=OK ;; PARTIAL) inet_state=WARN ;; FAIL) inet_state=FAIL ;; *) inet_state=UNK ;; esac
+
+  case "$LAN_TYPE" in   # layer 1
+    wifi)
+      if [[ "$WIFI_SIGNAL" =~ ^-[0-9]+$ ]]; then
+        if (( WIFI_SIGNAL < -70 )); then LS[1]=WARN; else LS[1]=OK; fi
+        LD[1]="Radio signal ${WIFI_SIGNAL} dBm$( (( WIFI_SIG_EST )) && echo ' (estimated)')"
+      else LS[1]=INFO; LD[1]="Radio signal not reported by the driver"; fi ;;
+    wired)
+      if [[ "$CARRIER" == 1 ]]; then LS[1]=OK; LD[1]="Cable carrier detected"; else LS[1]=FAIL; LD[1]="No carrier on the cable"; fi ;;
+    *) LS[1]=INFO; LD[1]="Physical link not measured" ;;
+  esac
+
+  mac="$(rd "$NETSYS/${LAN_IF:-none}/address")"   # layer 2
+  LS[2]="${N_STATE[2]}"
+  [[ "${LS[2]}" == OK ]] && (( ERR_NEW > 0 )) && LS[2]=WARN
+  LD[2]="Link to the router, MAC ${mac:--}, +${ERR_NEW} new errors during the scan"
+
+  LS[3]="$(worst "${N_STATE[1]}" "${N_STATE[3]}" "${N_STATE[4]}")"   # layer 3
+  LD[3]="IP ${ADDR4:--}, gateway ${GATEWAY:--}, internet ping ${LAT_MS:+${LAT_MS} ms}${LAT_MS:-n/a}"
+  [[ -n "$LAT_MS" ]] && LD[3]="IP ${ADDR4:--}, gateway ${GATEWAY:--}, internet ping ${LAT_MS} ms"
+
+  if [[ "$H_CONN" =~ ^[0-9]+$ && "$H_DNS" =~ ^[0-9]+$ ]]; then tcp_ms=$(( H_CONN - H_DNS )); fi   # layer 4
+  out="$(snmp_get Tcp OutSegs)"; rt="$(snmp_get Tcp RetransSegs)"; LS[4]=INFO; pct=""
+  if [[ "$out" =~ ^[0-9]+$ && "$rt" =~ ^[0-9]+$ ]] && (( out > 0 )); then
+    pct="$(awk -v r="$rt" -v o="$out" 'BEGIN { printf "%.2f", r * 100 / o }')"
+    if awk -v p="$pct" 'BEGIN { exit !(p >= 3) }'; then LS[4]=WARN; else LS[4]=OK; fi
+  fi
+  LD[4]="TCP connect ${tcp_ms:-n/a} ms, retransmits ${pct:-n/a}% of segments"
+
+  LS[5]=INFO; LD[5]="Sessions (logins, TLS resumption) are not measured"   # layer 5
+  if [[ -n "$tls" ]]; then LS[6]=OK; LD[6]="TLS encryption negotiated: $tls"; else LS[6]=INFO; LD[6]="TLS version not measured"; fi
+  LS[7]="$(worst "${N_STATE[5]}" "$inet_state")"
+  LD[7]="DNS ${DNS_OKN}/${DNS_TOTAL} lookups ok, HTTPS ${H_CODE:-no response}"
+
+  section "THE OSI MODEL APPLIED TO YOUR NETWORK"
+  wrap "The OSI model splits networking into seven layers. A problem on a lower layer breaks everything above it, so always troubleshoot from layer 1 upward."
+  printf '\n'
+  for i in 7 6 5 4 3 2 1; do osi_row "$i" "${names[i]}" "${LD[i]}" "${LS[i]}"; done
+  printf '\n'
+  for i in 1 2 3 4 5 6 7; do
+    if [[ "${LS[i]}" == WARN || "${LS[i]}" == FAIL ]]; then first=$i; break; fi
+  done
+  if (( first )); then wrap "First problem, working from the bottom: layer $first (${names[first]}). Fix it before looking at the layers above." "$YELLOW"
+  else wrap "No problems found at any measured layer." "$GREEN"; fi
+  note "Typical protocols: 7 HTTP, DNS, DHCP  |  6 TLS  |  4 TCP, UDP  |  3 IP, ICMP  |  2 Ethernet, Wi-Fi, ARP  |  1 radio, cable."
+}
+
+# ── --subnet: subnet calculator (pure arithmetic, nothing is sent) ───────────
+bin_ip() {
+  local n=$1 i k o b out=()
+  for i in 3 2 1 0; do
+    o=$(( (n >> (8 * i)) & 255 )); b=""
+    for k in 7 6 5 4 3 2 1 0; do b+=$(( (o >> k) & 1 )); done
+    out+=("$b")
+  done
+  local IFS=.; printf '%s' "${out[*]}"
+}
+int2ip() { printf '%d.%d.%d.%d' $(( ($1 >> 24) & 255 )) $(( ($1 >> 16) & 255 )) $(( ($1 >> 8) & 255 )) $(( $1 & 255 )); }
+ip2int() {   # dotted quad -> integer (fails, printing nothing, if it is not a valid IPv4 address)
+  local a b c d
+  [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  a=$((10#${BASH_REMATCH[1]})); b=$((10#${BASH_REMATCH[2]})); c=$((10#${BASH_REMATCH[3]})); d=$((10#${BASH_REMATCH[4]}))
+  (( a > 255 || b > 255 || c > 255 || d > 255 )) && return 1
+  printf '%s' "$(( (a << 24) | (b << 16) | (c << 8) | d ))"
+}
+ip_kind() {
+  local a=$(( $1 >> 24 )) b=$(( ($1 >> 16) & 255 ))
+  if   (( a == 10 )); then echo "private (RFC 1918, 10.0.0.0/8)"
+  elif (( a == 172 && b >= 16 && b <= 31 )); then echo "private (RFC 1918, 172.16.0.0/12)"
+  elif (( a == 192 && b == 168 )); then echo "private (RFC 1918, 192.168.0.0/16)"
+  elif (( a == 100 && b >= 64 && b <= 127 )); then echo "shared address space (carrier-grade NAT, 100.64.0.0/10)"
+  elif (( a == 169 && b == 254 )); then echo "link-local (169.254.0.0/16, self-assigned)"
+  elif (( a == 127 )); then echo "loopback (127.0.0.0/8)"
+  elif (( a == 192 && b == 0 && (($1 >> 8) & 255) == 2 )); then echo "documentation only (TEST-NET-1, 192.0.2.0/24, never routed)"
+  elif (( a == 198 && b == 51 && (($1 >> 8) & 255) == 100 )); then echo "documentation only (TEST-NET-2, 198.51.100.0/24, never routed)"
+  elif (( a == 203 && b == 0 && (($1 >> 8) & 255) == 113 )); then echo "documentation only (TEST-NET-3, 203.0.113.0/24, never routed)"
+  elif (( a >= 224 && a <= 239 )); then echo "multicast"
+  else echo "public (routable on the internet)"; fi
+}
+
+lab_subnet() {
+  local cidr="$MODE_ARG" own=0 pfx ip mask net wild bc first last hosts gwi="" t tn
+  LAN_IF=""; IFACE=""; GATEWAY=""
+  if [[ -z "$cidr" ]]; then
+    have ip || { echo "NetScope needs the 'ip' command (package: iproute2)." >&2; exit 1; }
+    detect_network
+    cidr="$(ip -o -4 addr show dev "$LAN_IF" scope global 2>/dev/null | awk '{ print $4; exit }')"
+    [[ -n "$cidr" ]] || { echo "No IPv4 address found. Try: ./netscope.sh --subnet 192.168.1.10/24" >&2; exit 1; }
+    own=1
+  fi
+  if [[ ! "$cidr" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$ ]]; then
+    echo "Please give an address with a prefix, for example: ./netscope.sh --subnet 192.168.1.10/24" >&2; exit 2
+  fi
+  local o1=$((10#${BASH_REMATCH[1]})) o2=$((10#${BASH_REMATCH[2]})) o3=$((10#${BASH_REMATCH[3]})) o4=$((10#${BASH_REMATCH[4]}))
+  pfx=$((10#${BASH_REMATCH[5]}))
+  if (( o1 > 255 || o2 > 255 || o3 > 255 || o4 > 255 )); then echo "Each number in an IPv4 address must be 0 to 255." >&2; exit 2; fi
+  if (( pfx > 32 )); then echo "The prefix must be between 0 and 32." >&2; exit 2; fi
+
+  ip=$(( (o1 << 24) | (o2 << 16) | (o3 << 8) | o4 ))
+  if (( pfx == 0 )); then mask=0; else mask=$(( (0xFFFFFFFF << (32 - pfx)) & 0xFFFFFFFF )); fi
+  net=$(( ip & mask )); wild=$(( ~mask & 0xFFFFFFFF )); bc=$(( net | wild ))
+  if   (( pfx == 32 )); then hosts=1; first=$ip; last=$ip
+  elif (( pfx == 31 )); then hosts=2; first=$net; last=$bc
+  else hosts=$(( wild - 1 )); first=$(( net + 1 )); last=$(( bc - 1 )); fi
+
+  section "SUBNET CALCULATOR: $cidr"
+  (( own )) && note "Using the address of your own adapter (${LAN_IF})."
+  sub "The answer"
+  kv "Address" "$(int2ip "$ip")"
+  kv "Prefix / netmask" "/$pfx  =  $(int2ip "$mask")"
+  kv "Network address" "$(int2ip "$net")   (first address, names the whole network)"
+  kv "Broadcast address" "$(int2ip "$bc")   (last address, reaches every host)"
+  kv "Usable host range" "$(int2ip "$first")  to  $(int2ip "$last")"
+  kv "Number of hosts" "$hosts"
+  kv "Address type" "$(ip_kind "$ip")"
+
+  sub "How it works: AND the address with the mask"
+  printf '  %s%-10s%s %s\n' "$GRAY" "address" "$RESET" "$(bin_ip "$ip")"
+  printf '  %s%-10s%s %s\n' "$GRAY" "netmask" "$RESET" "$(bin_ip "$mask")"
+  printf '  %s%-10s%s %s%s%s\n' "$GRAY" "network" "$RESET" "$BOLD" "$(bin_ip "$net")" "$RESET"
+  wrap "The prefix /$pfx means the first $pfx bits identify the network and the remaining $(( 32 - pfx )) bits identify the host. Where the mask has a 1 the bit is kept, where it has a 0 the bit is cleared. The result is the network address. Two addresses are on the same local network when they give the same result." "$DIM"
+  wrap "Hosts = 2^$(( 32 - pfx )) minus 2, because the network address and the broadcast address cannot be given to a computer (the exceptions are /31 point-to-point links and /32 single hosts)." "$DIM"
+
+  sub "Is it on your local network or does it go to the gateway?"
+  [[ -n "$GATEWAY" ]] && gwi="$GATEWAY"
+  for t in $gwi 1.1.1.1 "$(int2ip $(( net + 1 )))"; do
+    [[ "$t" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || continue
+    tn=$(( (BASH_REMATCH[1] << 24) | (BASH_REMATCH[2] << 16) | (BASH_REMATCH[3] << 8) | BASH_REMATCH[4] ))
+    if (( (tn & mask) == net )); then printf '  %-16s %son this network%s: sent directly to the device (found with ARP)\n' "$t" "$GREEN" "$RESET"
+    else printf '  %-16s %sother network%s: handed to the default gateway (router)\n' "$t" "$YELLOW" "$RESET"; fi
+  done
+
+  sub "Cheat sheet"
+  printf '  %s%-8s %-16s %s%s\n' "$GRAY" "PREFIX" "NETMASK" "USABLE HOSTS" "$RESET"
+  for t in 8 16 20 24 25 26 27 28 29 30; do
+    printf '  /%-7s %-16s %s\n' "$t" "$(int2ip $(( (0xFFFFFFFF << (32 - t)) & 0xFFFFFFFF )))" "$(( (1 << (32 - t)) - 2 ))"
+  done
+  printf '\n'
+  note "Try other networks:  ./netscope.sh --subnet 10.0.0.1/8   ./netscope.sh --subnet 172.16.5.9/20"
+}
+
+# ── --glossary ───────────────────────────────────────────────────────────────
+GLOSSARY=$(cat <<'EOF'
+ARP|layer 2-3|Address Resolution Protocol. Finds the MAC address that belongs to an IPv4 address on your local network. See your cache with: ip neigh
+BSSID|layer 2|The MAC address of one particular Wi-Fi access point. Mesh systems have several BSSIDs under one network name.
+Bufferbloat|performance|Extra delay that appears when a router's queues fill up because the line is busy. Shows up as lag during big downloads.
+CGNAT|layer 3|Carrier-grade NAT. Your provider shares one public IPv4 address between many customers. Addresses in 100.64.0.0/10 are a sign of it.
+CIDR|layer 3|Classless Inter-Domain Routing. Writes a network as an address plus a prefix length, such as 192.168.1.0/24.
+Captive portal|layer 7|A sign-in page that hotel, cafe or train Wi-Fi forces you through before giving internet access.
+DHCP|layer 7|Dynamic Host Configuration Protocol. Your router lends your computer an address, gateway and DNS server for a limited time called a lease.
+DNS|layer 7|Domain Name System. The internet's phone book: it turns names such as example.com into IP addresses. Usually uses UDP port 53.
+Firewall|layers 3-4|Software or hardware that allows or blocks traffic using rules based on addresses, ports and connection state.
+Frame|layer 2|The unit of data on a local link (Ethernet or Wi-Fi). It carries source and destination MAC addresses around an IP packet.
+Gateway|layer 3|The router your computer sends traffic to when the destination is not on the local network. Also called the default gateway.
+Handshake|layer 4-6|The opening exchange before data flows. TCP uses SYN, SYN-ACK, ACK. TLS then agrees on encryption keys.
+Hop|layer 3|One router along the path between you and a destination. Tracepath lists them one by one.
+HTTP|layer 7|HyperText Transfer Protocol. How browsers ask web servers for pages. HTTPS is HTTP carried inside TLS encryption.
+ICMP|layer 3|Internet Control Message Protocol. Carries error and test messages. Ping and tracepath are built on it.
+IPv4|layer 3|The classic 32-bit internet address, written as four numbers such as 192.168.1.10. About 4.3 billion exist, which is why NAT is used.
+IPv6|layer 3|The newer 128-bit address, written in hexadecimal such as fd3a:7f9f::1. Large enough to give every device its own address.
+Jitter|performance|How much the delay changes from one packet to the next. High jitter makes calls and games choppy even when average delay is low.
+Latency|performance|The time a packet needs to go to a destination and back, measured in milliseconds. Also called round-trip time or ping time.
+MAC address|layer 2|A 48-bit hardware address such as b8:e8:56:07:51:dc. It identifies a network card on the local link only and is not routed.
+MTU|layer 2-3|Maximum Transmission Unit. The largest packet a link can carry without splitting it. Ethernet is usually 1500 bytes. Try: ./netscope.sh --mtu
+NAT|layer 3|Network Address Translation. Your router swaps your private address for its public one so many devices can share one internet address.
+OSI model|all layers|A seven-layer way to think about networks: physical, data link, network, transport, session, presentation, application. Try: ./netscope.sh --osi
+Packet|layer 3|The unit of data that travels across the internet. It carries source and destination IP addresses.
+Packet loss|performance|The share of packets that never arrive. Even 1 to 2 percent can hurt calls, games and TCP speed.
+Ping|layer 3|A test that sends an ICMP echo request and times the reply. It shows whether a host is reachable and how long the round trip takes.
+Port|layer 4|A number from 0 to 65535 that tells the computer which program a TCP or UDP packet is for. HTTPS uses 443, DNS uses 53.
+Prefix|layer 3|The number after the slash in 192.168.1.0/24. It says how many leading bits are the network part of the address.
+Router|layer 3|A device that forwards packets between networks. Your home router connects your local network to your provider.
+SSID|layer 2|Service Set Identifier. The name of a Wi-Fi network, such as the one you pick from the network menu.
+Subnet|layer 3|A smaller network carved out of a larger address range. Devices in the same subnet talk directly without a router. Try: ./netscope.sh --subnet
+TCP|layer 4|Transmission Control Protocol. Reliable, ordered delivery: lost segments are sent again. Used by web pages, email and file transfers.
+TLS|layer 6|Transport Layer Security. Encrypts and authenticates a connection so others cannot read or change it. The S in HTTPS. Try: ./netscope.sh --tls example.com
+TTL|layer 3|Time To Live. A counter that each router lowers by one, so packets cannot loop forever. In DNS, the TTL is how long an answer may be cached.
+UDP|layer 4|User Datagram Protocol. Fast and simple with no delivery guarantee. Used by DNS, video calls and many games.
+VPN|layers 3-7|Virtual Private Network. Wraps your traffic in an encrypted tunnel to another network. The tunnel adds headers, so it lowers the usable MTU.
+EOF
+)
+
+lab_glossary() {
+  local q="${MODE_ARG,,}" term layer def n=0
+  section "NETWORKING GLOSSARY"
+  while IFS='|' read -r term layer def; do
+    [[ -n "$term" ]] || continue
+    if [[ -z "$q" || "${term,,}" == *"$q"* ]]; then
+      printf '\n  %s%s%s  %s[%s]%s\n' "$BOLD$CYAN" "$term" "$RESET" "$GRAY" "$layer" "$RESET"
+      wrap "$def"; n=$(( n + 1 ))
+    fi
+  done <<<"$GLOSSARY"
+  (( n )) || note "No entry matches '$MODE_ARG'. Run --glossary on its own to list everything."
+  printf '\n'
+}
+
+# ── --dns: DNS explorer ──────────────────────────────────────────────────────
+dns_type_help() {
+  case "$1" in
+    A)     echo "the IPv4 address of the name" ;;
+    AAAA)  echo "the IPv6 address of the name" ;;
+    CNAME) echo "an alias that points to another name" ;;
+    MX)    echo "mail servers (a lower number means higher priority)" ;;
+    NS)    echo "the name servers that are authoritative for the domain" ;;
+    TXT)   echo "free text, often email security (SPF) and ownership proofs" ;;
+    SOA)   echo "start of authority: the zone's main server, contact and timers" ;;
+  esac
+}
+
+lab_dns() {
+  local d="$MODE_ARG" srv out t ty n ip1
+  LAN_IF=""; IFACE=""
+  d="${d#http://}"; d="${d#https://}"; d="${d%%/*}"
+  [[ "$d" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "That does not look like a domain name. Example: ./netscope.sh --dns example.com" >&2; exit 2; }
+  have dig || { echo "The DNS explorer needs 'dig'. Install it with: sudo apt install bind9-dnsutils" >&2; exit 1; }
+  have ip && detect_network
+  srv="$(get_dns_servers | head -n1)"
+  section "DNS EXPLORER: $d"
+  wrap "Your computer does not look names up itself. It asks a resolver (usually your router), which answers from its memory or asks other servers on your behalf."
+  kv "Your resolver" "${srv:-unknown}"
+
+  sub "Step 1: ask the same question twice (caching)"
+  local answered=0
+  for n in 1 2; do
+    out="$(timeout 6 dig +noall +answer +stats +time=3 +tries=1 "$d" A 2>/dev/null)"
+    t="$(sed -nE 's/^;; Query time: ([0-9]+) msec.*/\1/p' <<<"$out" | head -n1)"
+    if awk '$4 == "A" || $4 == "CNAME" { f = 1 } END { exit !f }' <<<"$out"; then
+      kv "Query $n" "${t:-?} ms"; answered=$(( answered + 1 ))
+    else
+      kv "Query $n" "no answer (timed out, blocked or the name does not exist)"
+    fi
+  done
+  if (( answered == 2 )); then note "The second answer is usually faster because the resolver remembered (cached) the first one."
+  else note "No cache comparison is possible without two answers. Check your connection with ./netscope.sh first."; fi
+
+  sub "Step 2: record types"
+  for ty in A AAAA CNAME MX NS TXT SOA; do
+    out="$(timeout 6 dig +noall +answer +time=3 +tries=1 "$d" "$ty" 2>/dev/null)"
+    printf '\n  %s%s%s  %s%s%s\n' "$BOLD" "$ty" "$RESET" "$DIM" "$(dns_type_help "$ty")" "$RESET"
+    if [[ -n "$out" ]]; then head -n 6 <<<"$out" | sed 's/^/    /'; else printf '    %s(none)%s\n' "$GRAY" "$RESET"; fi
+  done
+  printf '\n'
+  note "The number after each name is the TTL: how many seconds a resolver may keep that answer before asking again."
+
+  ip1="$(timeout 6 dig +short +time=3 +tries=1 "$d" A 2>/dev/null | grep -E '^[0-9.]+$' | head -n1)"
+  if [[ -n "$ip1" ]]; then
+    sub "Step 3: reverse lookup of $ip1"
+    out="$(timeout 6 dig +short +time=3 +tries=1 -x "$ip1" 2>/dev/null | head -n1)"
+    kv "PTR record" "${out:-none}"
+    note "Reverse DNS maps an address back to a name. Many servers have none, or a generic provider name."
+  fi
+
+  sub "Step 4: the path DNS follows from the top (dig +trace)"
+  note "Starts at the root servers and walks down, ignoring your resolver's cache."
+  out="$(timeout 25 dig +trace +nodnssec +noall +answer +time=3 +tries=1 "$d" 2>/dev/null)"
+  if ! awk '$4 == "A" || $4 == "AAAA" || $4 == "CNAME" { f = 1 } END { exit !f }' <<<"$out"; then
+    note "The trace did not reach an answer. Some networks block DNS queries sent directly to root servers, or you are offline."
+  else
+    awk '$4 == "NS" { if (!($1 in c)) o[++n] = $1; c[$1]++ }
+         END { for (i = 1; i <= n; i++) printf "  %d. zone %-24s %d name servers\n", i, (o[i] == "." ? ". (root)" : o[i]), c[o[i]] }' <<<"$out"
+    printf '  %sanswer:%s\n' "$GRAY" "$RESET"
+    awk '$4 == "A" || $4 == "AAAA" || $4 == "CNAME" { print "    " $0 }' <<<"$out" | head -n 6
+    note "Each level only knows who runs the next one down: the root knows the TLD, the TLD knows the domain, and the domain's own server knows the answer."
+  fi
+  printf '\n'
+}
+
+# ── --tls: TLS / certificate inspector ───────────────────────────────────────
+lab_tls() {
+  local t="$MODE_ARG" host port out proto cipher verify leaf subj iss na exp days nchain san a b tm
+  t="${t#https://}"; t="${t%%/*}"
+  host="${t%%:*}"; port=443; [[ "$t" == *:* ]] && port="${t##*:}"
+  [[ "$host" =~ ^[A-Za-z0-9._-]+$ && "$port" =~ ^[0-9]{1,5}$ ]] || { echo "Please give a host such as example.com or example.com:443" >&2; exit 2; }
+  have openssl || { echo "The TLS inspector needs 'openssl'. Install it with: sudo apt install openssl" >&2; exit 1; }
+  section "TLS INSPECTOR: $host:$port"
+  wrap "TLS is what makes HTTPS private. After the TCP handshake, the client and server agree on a protocol version and cipher, the server proves its identity with a certificate signed by an authority your computer trusts, and both sides derive secret keys."
+  out="$(timeout 12 openssl s_client -connect "$host:$port" -servername "$host" -showcerts </dev/null 2>&1)"
+  if ! grep -q 'BEGIN CERTIFICATE' <<<"$out"; then
+    note "No TLS handshake could be completed with $host:$port."
+    head -n 3 <<<"$out" | sed 's/^/  /'
+    exit 1
+  fi
+  proto="$(sed -nE 's/^New, ([^,]+), Cipher is (.*)$/\1/p' <<<"$out" | head -n1)"
+  cipher="$(sed -nE 's/^New, ([^,]+), Cipher is (.*)$/\2/p' <<<"$out" | head -n1)"
+  verify="$(sed -nE 's/^ *Verify return code: (.*)$/\1/p' <<<"$out" | tail -n1)"
+  nchain="$(grep -c 'BEGIN CERTIFICATE' <<<"$out")"
+  leaf="$(awk '/BEGIN CERTIFICATE/ { f = 1 } f { print } /END CERTIFICATE/ { if (f) exit }' <<<"$out")"
+  subj="$(openssl x509 -noout -subject <<<"$leaf" 2>/dev/null | sed 's/^subject= *//')"
+  iss="$(openssl x509 -noout -issuer <<<"$leaf" 2>/dev/null | sed 's/^issuer= *//')"
+  na="$(openssl x509 -noout -enddate <<<"$leaf" 2>/dev/null | cut -d= -f2)"
+  san="$(openssl x509 -noout -ext subjectAltName <<<"$leaf" 2>/dev/null | tail -n +2 | tr -d ' \n')"
+  exp="$(date -d "$na" +%s 2>/dev/null)"; days=""
+  [[ "$exp" =~ ^[0-9]+$ ]] && days=$(( (exp - $(date +%s)) / 86400 ))
+
+  sub "The connection"
+  kv "Protocol" "${proto:-unknown}"
+  kv "Cipher suite" "${cipher:-unknown}"
+  if have curl; then
+    if tm="$(curl -sS -o /dev/null --max-time 8 -w '%{time_connect} %{time_appconnect}' "https://$host:$port/" 2>/dev/null)"; then
+      read -r a b <<<"$tm"
+      [[ -n "$b" ]] && kv "TCP connect / TLS done" "$(to_ms "$a") ms / $(to_ms "$b") ms  (cumulative)"
+    else
+      kv "TCP connect / TLS done" "not timed (curl could not verify the certificate)"
+    fi
+  fi
+  sub "The certificate"
+  kv "Subject" "${subj:-unknown}"
+  kv "Issued by" "${iss:-unknown}"
+  kv "Expires" "${na:-unknown}${days:+  ($days days left)}"
+  [[ -n "$san" ]] && kv "Valid for names" "${san:0:90}"
+  kv "Chain length" "$nchain certificate(s) sent"
+  if [[ "$verify" == "0 (ok)"* ]]; then show_check OK "Trusted by this computer" "$verify"
+  else show_check WARN "Trusted by this computer" "${verify:-unknown}"; fi
+  if [[ -n "$days" ]]; then
+    if   (( days < 0 ));  then show_check FAIL "Expiry" "the certificate has expired"
+    elif (( days < 14 )); then show_check WARN "Expiry" "expires in $days days"
+    else show_check OK "Expiry" "$days days left"; fi
+  fi
+  printf '\n'
+  wrap "A chain means the server's own certificate is signed by an intermediate authority, which is signed by a root authority that is already stored on your computer. Your computer trusts the site because it can follow the signatures up to a root it already knows." "$DIM"
+  printf '\n'
+}
+
+# ── --mtu: path MTU discovery ────────────────────────────────────────────────
+mtu_try() {   # host payload
+  if ping -n -c 1 -W 1 -M do -s "$2" "$1" >/dev/null 2>&1; then
+    printf '  payload %4d + 28 header = %4d bytes   %sfits%s\n' "$2" "$(( $2 + 28 ))" "$GREEN" "$RESET"; return 0
+  fi
+  printf '  payload %4d + 28 header = %4d bytes   %stoo big%s\n' "$2" "$(( $2 + 28 ))" "$YELLOW" "$RESET"; return 1
+}
+
+lab_mtu() {
+  local h="${MODE_ARG:-1.1.1.1}" lo hi mid best pmtu ifmtu=""
+  LAN_IF=""; IFACE=""
+  [[ "$h" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "That does not look like a host name or address." >&2; exit 2; }
+  have ping || { echo "The MTU test needs the 'ping' command." >&2; exit 1; }
+  have ip && detect_network
+  [[ -n "$LAN_IF" ]] && ifmtu="$(rd "$NETSYS/$LAN_IF/mtu")"
+  section "PATH MTU DISCOVERY: $h"
+  wrap "The MTU is the largest packet a link can carry without splitting it. The smallest MTU anywhere along the path decides what really fits. NetScope sends pings with the Do-Not-Fragment flag at different sizes and uses a binary search to find the largest one that gets through. A ping adds 28 bytes of headers (20 IP + 8 ICMP) to its payload."
+  printf '\n'
+  if ! ping -n -c 1 -W 2 "$h" >/dev/null 2>&1; then
+    note "$h does not answer ping, so the test cannot run. Try another host, for example: ./netscope.sh --mtu 8.8.8.8"
+    exit 1
+  fi
+  if mtu_try "$h" 1472; then best=1472
+  else
+    lo=56; hi=1471
+    while (( lo < hi )); do
+      mid=$(( (lo + hi + 1) / 2 ))
+      if mtu_try "$h" "$mid"; then lo=$mid; else hi=$(( mid - 1 )); fi
+    done
+    best=$lo
+  fi
+  pmtu=$(( best + 28 ))
+  sub "Result"
+  kv "Path MTU to $h" "$pmtu bytes"
+  [[ -n "$ifmtu" ]] && kv "Your adapter's MTU" "$ifmtu bytes"
+  case "$pmtu" in
+    1500) wrap "A full 1500 bytes fits. This is the normal Ethernet size and nothing on the path is shrinking it." ;;
+    1492) wrap "1492 is the classic sign of PPPoE, which many DSL and some fibre providers use. It adds an 8-byte header." ;;
+    *)    if (( pmtu < 1492 )); then wrap "Something on the path has a smaller MTU than Ethernet. VPN tunnels, mobile networks and some tunnels add headers, which is why you can see values such as 1420, 1400 or 1280."
+          else wrap "Slightly below 1500. A small tunnel or provider setting is using some of the space for its own headers."; fi ;;
+  esac
+  if [[ "$ifmtu" =~ ^[0-9]+$ ]] && (( pmtu < ifmtu )); then
+    wrap "Your adapter allows $ifmtu bytes, but the path only allows $pmtu. Normally routers tell your computer about this (path MTU discovery). If some sites hang while others work, a firewall blocking those messages is a classic cause." "$DIM"
+  fi
+  printf '\n'
+}
+
+# ── --walk: follow ONE packet from your computer, hop by hop ─────────────────
+# Read-only. It uses your routing table (`ip route get`), your neighbour cache
+# (`ip neigh`, plus at most one ping to fill it) and tracepath / traceroute to
+# list the routers. It does not scan anything.
+WALK_N=0; PW_SM=""; PW_DM=""; PW_SI=""; PW_DI=""; PW_TT=""
+
+walk_step() { WALK_N=$(( WALK_N + 1 )); sub "Step $WALK_N: $1"; }
+
+wf_fld() {   # value previous  ->  value, highlighted when it differs from the previous frame
+  if [[ -n "${2:-}" && "$1" != "$2" ]]; then printf '%s%s%s' "$YELLOW$BOLD" "$1" "$RESET"
+  else printf '%s' "$1"; fi
+}
+walk_frame() {   # title src-mac dst-mac src-ip dst-ip ttl
+  printf '     %s%s%s\n' "$BOLD" "$1" "$RESET"
+  printf '       MAC   from %s   to %s\n' "$(wf_fld "$2" "$PW_SM")" "$(wf_fld "$3" "$PW_DM")"
+  printf '       IP    from %s   to %s   TTL %s\n' "$(wf_fld "$4" "$PW_SI")" "$(wf_fld "$5" "$PW_DI")" "$(wf_fld "$6" "$PW_TT")"
+  PW_SM="$2"; PW_DM="$3"; PW_SI="$4"; PW_DI="$5"; PW_TT="$6"
+}
+
+lab_walk() {
+  local d="$MODE_ARG" dest dn rt dev nh src cidr pfx mask net smac nhmac nstate line
+  local ttl0 tool raw h a r k l2=1 by_and=0 nat=0 shown_src srckind destkind sn
+  local label ttlin ttlout macin macout nxt nxtmac h2 SDBUF=""
+  local -a HOPS=()
+  have stdbuf && SDBUF="stdbuf -oL"
+
+  LAN_IF=""; IFACE=""
+  d="${d#http://}"; d="${d#https://}"; d="${d%%/*}"; d="${d%%:*}"
+  [[ "$d" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "That does not look like a host name or IPv4 address. Example: ./netscope.sh --walk 8.8.8.8" >&2; exit 2; }
+  have ip || { echo "NetScope needs the 'ip' command (package: iproute2)." >&2; exit 1; }
+
+  # ── resolve the destination to an IPv4 address ──────────────────────────────
+  if dn="$(ip2int "$d" 2>/dev/null)"; then dest="$d"
+  else
+    have getent || { echo "--walk needs 'getent' to look up names. Give an IPv4 address instead." >&2; exit 1; }
+    dest="$(timeout 6 getent ahostsv4 "$d" 2>/dev/null | awk '{ print $1; exit }')"
+    dn="$(ip2int "${dest:-x}" 2>/dev/null)" || { echo "Could not find an IPv4 address for '$d'. Check the name, or try an IP address." >&2; exit 1; }
+  fi
+
+  # ── ask the kernel what it would really do ──────────────────────────────────
+  rt="$(ip -4 route get "$dest" 2>&1 | head -n1)"
+  if [[ -z "$rt" || "$rt" == *RTNETLINK* || "$rt" == *nreachable* ]]; then
+    echo "Your computer has no route to $dest (${rt:-no answer}). Check your connection with ./netscope.sh first." >&2; exit 1
+  fi
+  if [[ "$rt" == local* ]]; then
+    section "PACKET WALK-THROUGH: $d"
+    wrap "$dest is an address of this very computer, so the packet never leaves it. It is handed from the IP layer straight back up (through the loopback interface) and no router, MAC address or TTL change is involved."
+    printf '\n'; return 0
+  fi
+  dev="$(route_field "$rt" dev)"; nh="$(route_field "$rt" via)"; src="$(route_field "$rt" src)"
+  cidr="$(ip -o -4 addr show dev "$dev" 2>/dev/null | awk -v s="$src" '{ split($4, a, "/"); if (a[1] == s) { print $4; exit } }')"
+  [[ -z "$cidr" ]] && cidr="$(ip -o -4 addr show dev "$dev" scope global 2>/dev/null | awk '{ print $4; exit }')"
+  [[ -n "$cidr" ]] || { echo "No IPv4 address found on $dev." >&2; exit 1; }
+  src="${cidr%/*}"; pfx="${cidr#*/}"
+  sn="$(ip2int "$src")" || { echo "Could not read your IPv4 address ($src)." >&2; exit 1; }
+  if (( pfx == 0 )); then mask=0; else mask=$(( (0xFFFFFFFF << (32 - pfx)) & 0xFFFFFFFF )); fi
+  net=$(( sn & mask ))
+  (( (dn & mask) == net )) && by_and=1
+  smac="$(rd "$NETSYS/$dev/address")"
+  if [[ -z "$smac" || "$smac" == 00:00:00:00:00:00 ]] || ip -o link show dev "$dev" 2>/dev/null | grep -q NOARP; then l2=0; fi
+  ttl0="$(rd /proc/sys/net/ipv4/ip_default_ttl)"; [[ "$ttl0" =~ ^[0-9]+$ ]] || ttl0=64
+  srckind="$(ip_kind "$sn")"; destkind="$(ip_kind "$dn")"
+  if [[ "$srckind" == private* || "$srckind" == shared* ]] && [[ "$destkind" == public* ]]; then nat=1; fi
+
+  section "PACKET WALK-THROUGH: your computer to $d"
+  wrap "This follows one packet from your computer to the destination and shows, step by step, what your computer decides and what changes at every hop. Everything below uses your real addresses. Nothing is changed or scanned."
+  [[ "$d" != "$dest" ]] && kv "Name resolved to" "$dest  (DNS gave this answer for $d)"
+  kv "Destination" "$dest   $(ip_kind "$dn")"
+
+  # ── Step 1: who am I ────────────────────────────────────────────────────────
+  walk_step "Who am I on this network?"
+  kv "Interface used" "$dev"
+  kv "My IP address" "$src/$pfx"
+  if (( l2 )); then kv "My MAC address" "$smac"
+  else kv "My MAC address" "none: $dev is a point-to-point tunnel (VPN), there are no Ethernet frames on it"; fi
+  kv "My netmask" "$(int2ip "$mask")  (/$pfx)"
+  note "The IP address says where I am on the network; the MAC address says which network card I am on this one link."
+
+  # ── Step 2: AND ─────────────────────────────────────────────────────────────
+  walk_step "Is the destination on my network? AND my addresses with the netmask"
+  wrap "Computers decide 'next door or far away?' with a bitwise AND: keep the bits where the netmask has a 1, clear the bits where it has a 0. If both addresses give the same network, they are on the same local network."
+  printf '\n'
+  printf '  %s%-18s%s %s   %s\n' "$GRAY" "my IP" "$RESET" "$(bin_ip "$sn")" "$src"
+  printf '  %s%-18s%s %s   /%s\n' "$GRAY" "netmask" "$RESET" "$(bin_ip "$mask")" "$pfx"
+  printf '  %s%-18s%s %s%s%s   %s\n' "$GRAY" "my IP AND mask" "$RESET" "$BOLD" "$(bin_ip "$net")" "$RESET" "$(int2ip "$net")"
+  printf '  %s%-18s%s %s   %s\n' "$GRAY" "destination IP" "$RESET" "$(bin_ip "$dn")" "$dest"
+  printf '  %s%-18s%s %s%s%s   %s\n' "$GRAY" "dest. AND mask" "$RESET" "$BOLD" "$(bin_ip $(( dn & mask )))" "$RESET" "$(int2ip $(( dn & mask )))"
+
+  # ── Step 3: local or remote ─────────────────────────────────────────────────
+  walk_step "Decision: local or remote?"
+  if (( by_and )); then
+    printf '  %sThe two results are equal%s: %s is on my own network, so it is %sLOCAL%s.\n' "$GREEN" "$RESET" "$dest" "$BOLD" "$RESET"
+  else
+    printf '  %sThe two results differ%s: %s is on a different network, so it is %sREMOTE%s.\n' "$YELLOW" "$RESET" "$dest" "$BOLD" "$RESET"
+    wrap "I cannot deliver it myself. I must give it to a router that knows the way." "$DIM"
+  fi
+  if (( by_and )) && [[ -n "$nh" ]]; then
+    note "The routing table nevertheless sends it via $nh (a more specific route wins over the plain network test)."
+  elif (( ! by_and )) && [[ -z "$nh" ]]; then
+    note "The routing table has a specific route that reaches it directly on $dev, for example a VPN or point-to-point link."
+  fi
+
+  # ── Step 4: next hop ────────────────────────────────────────────────────────
+  walk_step "Pick the next hop  (ip route get $dest)"
+  printf '  %s%s%s\n' "$CYAN" "$rt" "$RESET"
+  printf '\n'
+  if [[ -n "$nh" ]]; then
+    kv "Next hop" "$nh   (my default gateway / router)"
+    wrap "The IP packet will be addressed to $dest, but the frame carrying it is handed to $nh. Neither the router's IP address nor its MAC ever appears as the final destination." "$DIM"
+  else
+    nh="$dest"
+    kv "Next hop" "$dest   (the destination itself, no router needed)"
+  fi
+  kv "Leaves through" "$dev, using source address $src"
+
+  # ── Step 5: ARP ─────────────────────────────────────────────────────────────
+  nhmac=""; nstate=""
+  walk_step "Find the next hop's MAC address  (ARP, ip neigh)"
+  if (( ! l2 )); then
+    note "$dev is a tunnel: it carries IP packets directly, so there is no ARP and no MAC address to find."
+    nhmac="(no MAC on a tunnel)"
+  else
+    wrap "On a local link, frames are delivered by MAC address. My computer broadcasts 'who has $nh?' (ARP) and the owner answers with its MAC address. The answer is remembered in the neighbour table."
+    printf '\n'
+    line="$(ip neigh show "$nh" dev "$dev" 2>/dev/null | head -n1)"
+    nhmac="$(awk '{ for (i = 1; i <= NF; i++) if ($i == "lladdr") { print $(i + 1); exit } }' <<<"$line")"
+    if [[ -z "$nhmac" ]] && have ping; then
+      note "Not in the neighbour table yet: sending one ping to $nh, which makes the kernel ask with ARP."
+      ping -n -c 1 -W 1 "$nh" >/dev/null 2>&1
+      line="$(ip neigh show "$nh" dev "$dev" 2>/dev/null | head -n1)"
+      nhmac="$(awk '{ for (i = 1; i <= NF; i++) if ($i == "lladdr") { print $(i + 1); exit } }' <<<"$line")"
+    fi
+    nstate="$(awk '{ print $NF }' <<<"$line")"
+    printf '  %s%s%s\n' "$CYAN" "${line:-no entry for $nh}" "$RESET"
+    printf '\n'
+    if [[ -n "$nhmac" ]]; then
+      kv "Next hop MAC" "$nhmac   (state: ${nstate:-?})"
+    else
+      kv "Next hop MAC" "not found (the device did not answer ARP)"
+      nhmac="(unknown)"
+    fi
+  fi
+
+  # ── Step 6: the frame that leaves ───────────────────────────────────────────
+  walk_step "Build and send the frame"
+  wrap "The packet is wrapped in an Ethernet / Wi-Fi frame. Addresses in the frame are for ONE link only; addresses in the IP header are for the whole journey. The TTL starts at $ttl0 (this computer's default)."
+  printf '\n'
+  if (( l2 )); then
+    walk_frame "Frame leaving your computer" "$smac" "$nhmac" "$src" "$dest" "$ttl0"
+  else
+    walk_frame "Packet leaving your computer (no MAC header on a tunnel)" "-" "-" "$src" "$dest" "$ttl0"
+  fi
+
+  # ── local destination: done ─────────────────────────────────────────────────
+  if (( by_and )) && [[ "$nh" == "$dest" ]]; then
+    walk_step "Delivered: nothing in between"
+    wrap "The destination is on my own network, so the next hop IS the destination. The frame goes straight to its MAC address. No router touches it, so the TTL stays at $ttl0 and every address stays exactly as it left."
+    walk_summary "$ttl0" 0 "$nat"
+    return 0
+  fi
+
+  # ── the routers along the way (tracepath / traceroute) ──────────────────────
+  if have tracepath; then tool=tracepath; elif have traceroute; then tool=traceroute; else tool=""; fi
+  if [[ -n "$tool" ]]; then
+    printf '\n  %sListing the routers with %s (up to 25 seconds)...%s\n' "$DIM" "$tool" "$RESET"
+    if [[ "$tool" == tracepath ]]; then
+      raw="$(timeout 25 ${SDBUF:-} tracepath -n -m 15 "$dest" 2>/dev/null)"
+    else
+      raw="$(timeout 25 ${SDBUF:-} traceroute -n -q 1 -w 1 -m 15 "$dest" 2>/dev/null)"
+    fi
+    mapfile -t HOPS < <(awk '
+      { h = $1; sub(/[:?]+$/, "", h); if (h !~ /^[0-9]+$/ || (h in seen)) next
+        a = $2; rt = "-"
+        if (a ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+          if ($3 ~ /^[0-9.]+ms$/) rt = $3; else if ($3 ~ /^[0-9.]+$/ && $4 == "ms") rt = $3 "ms"
+          seen[h] = 1; print h, a, rt
+        } else if (a == "no" || a == "*") { seen[h] = 1; print h, "?", "-" } }' <<<"$raw")
+  fi
+
+  if (( ${#HOPS[@]} == 0 )); then
+    walk_step "The routers after the first hop"
+    if [[ -z "$tool" ]]; then wrap "Neither tracepath nor traceroute is installed (sudo apt install iputils-tracepath), so the routers cannot be listed." "$DIM"
+    else wrap "$tool did not return any hop (the network may block it)." "$DIM"; fi
+    wrap "Every router on the way does the same four things: it receives the frame addressed to its own MAC, lowers the TTL by one (a packet whose TTL reaches 0 is dropped and the sender is told), looks up the destination IP in its own routing table, and sends the packet on in a brand-new frame with new MAC addresses. The IP addresses stay as they are. With TTL $ttl0 at the start, the packet would arrive at the first router with $ttl0, leave it with $(( ttl0 - 1 )), leave the second with $(( ttl0 - 2 )), and so on."
+    walk_summary "$ttl0" "?" "$nat"
+    return 0
+  fi
+
+  local total=${#HOPS[@]} reached=0 nrouters
+  read -r h a r <<<"${HOPS[total - 1]}"
+  [[ "$a" == "$dest" ]] && reached=1
+  nrouters=$total; (( reached )) && nrouters=$(( total - 1 ))
+
+  shown_src="$src"
+  for (( k = 0; k < total; k++ )); do
+    read -r h a r <<<"${HOPS[k]}"
+    if [[ "$a" == "$dest" ]]; then
+      walk_step "Arrival at $dest"
+      wrap "The frame is addressed to the destination's own MAC and the packet to its own IP, so it accepts it and passes it up to TCP / ICMP / the application. It crossed $nrouters router(s); the TTL has dropped from $ttl0 to $(( ttl0 - nrouters ))."
+      [[ "$r" != "-" ]] && kv "Round trip" "$r  (to the destination)"
+      (( nat )) && wrap "Note the source IP: the destination sees the public address of your router, not your private $src, so its reply goes back to the router, which translates it back (NAT)." "$DIM"
+      break
+    fi
+    ttlin=$(( ttl0 - h + 1 )); ttlout=$(( ttl0 - h ))
+    if [[ "$a" == "?" ]]; then label="a router that does not answer (address unknown)"; else label="router $a"; fi
+    walk_step "Hop $h: $label"
+    if (( l2 )); then
+      (( k == 0 )) && macin="$nhmac" || macin="<R$h in>"
+      macout="<R$h out>"; nxtmac="<next hop>"
+      if (( k + 1 < total )); then
+        read -r h2 nxt _ <<<"${HOPS[k + 1]}"
+        if [[ "$nxt" == "$dest" ]]; then nxtmac="<dest in>"; else nxtmac="<R$h2 in>"; fi
+      fi
+      wrap "The frame arrives addressed to this router's MAC ($macin) with TTL $ttlin. The router discards the old frame, lowers the TTL to $ttlout, looks up $dest in its own routing table, and sends the packet on in a brand-new frame."
+    else
+      macout="-"; nxtmac="-"
+      wrap "The packet arrives with TTL $ttlin. The router lowers the TTL to $ttlout, looks up $dest in its own routing table and sends it on."
+    fi
+    [[ "$r" != "-" ]] && kv "Round trip" "$r  (to this router)"
+    (( k == 0 && nat )) && shown_src="<your public IP>"
+    walk_frame "Frame leaving router $h" "$macout" "$nxtmac" "$shown_src" "$dest" "$ttlout"
+    if (( k == 0 && nat )); then
+      wrap "Your source address $src is $srckind, and the destination is public, so this router also rewrites the SOURCE IP to its own public address (NAT). That is the one common exception to 'IP addresses never change'." "$DIM"
+    fi
+  done
+  if (( ! reached )); then
+    walk_step "Beyond the last router listed"
+    note "$tool stopped before reaching $dest (a router or firewall stopped answering, or the 15-hop limit was reached)."
+    note "The packet continues the same way: new MACs and TTL minus one at every router."
+  fi
+  walk_summary "$ttl0" "$nrouters" "$nat"
+}
+
+walk_summary() {   # ttl0 routers nat
+  local drop=""
+  [[ "$2" != "?" ]] && drop="; with $2 router(s) it arrives with TTL $(( $1 - ${2/\?/0} ))"
+  section "WHAT CHANGED AND WHAT DID NOT"
+  printf '  %sMAC addresses%s\n' "$BOLD" "$RESET"
+  wrap "Rewritten at EVERY hop. Each link has its own pair: the sender and receiver of that one stretch only."
+  printf '  %sIP addresses%s\n' "$BOLD" "$RESET"
+  wrap "Unchanged from start to finish$( (( $3 )) && echo ', except your private source address, which your router replaces once with its public one (NAT)')."
+  printf '  %sTTL%s\n' "$BOLD" "$RESET"
+  wrap "Starts at $1 and drops by 1 at every router$drop. At 0 the packet is discarded; tracepath uses exactly this to discover the routers."
+  printf '\n'
+  wrap "In short: the IP header is the address on the parcel, the MAC header is the courier's hand-over slip for one stretch. Every router throws the slip away and writes a new one." "$DIM"
+  note "Try it yourself:  ip route get <ip>    ip neigh    tracepath -n <ip>"
+  printf '\n'
+}
+
+run_lab() {
+  case "$MODE" in
+    walk)     lab_walk ;;
+    subnet)   lab_subnet ;;
+    glossary) lab_glossary ;;
+    dns)      lab_dns ;;
+    tls)      lab_tls ;;
+    mtu)      lab_mtu ;;
+  esac
+  exit 0
+}
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  MAIN
 # ══════════════════════════════════════════════════════════════════════════════
 finish() {   # exit status reflects the health score so other scripts can react
@@ -1717,6 +2488,7 @@ main() {
   local t_start t_end do_adv key=""
 
   (( LIVE )) && live_mode
+  [[ -n "$MODE" ]] && run_lab
 
   if ! have ip; then
     (( JSON )) || banner
@@ -1748,6 +2520,8 @@ main() {
   printf '  %s%s%s Scan complete in %s seconds.\n' "$GREEN" "$G_OK" "$RESET" "$(awk -v a="$t_start" -v b="$t_end" 'BEGIN { printf "%.1f", (b - a) / 1000 }')"
 
   render_basic
+  (( LEARN )) && render_learn
+  (( OSI )) && render_osi
 
   do_adv="$ADVANCED"
   if (( ! do_adv && PROMPT )); then
@@ -1765,6 +2539,8 @@ main() {
   printf '\n  %sNetScope %s%s' "$DIM" "$VERSION" "$RESET"
   if (( ! do_adv && ! PROMPT )); then printf '%s  %s  use --advanced for the technical view%s' "$DIM" "$G_MID" "$RESET"; fi
   (( SPEED )) || printf '%s  %s  --speed measures download/upload%s' "$DIM" "$G_MID" "$RESET"
+  (( LEARN )) || printf '%s  %s  --learn explains each step%s' "$DIM" "$G_MID" "$RESET"
+  printf '%s  %s  --walk DEST follows a packet%s' "$DIM" "$G_MID" "$RESET"
   printf '%s  %s  --live for a live monitor%s\n\n' "$DIM" "$G_MID" "$RESET"
   finish
 }
