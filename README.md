@@ -219,7 +219,7 @@ Because the chain is checked in order, a problem at "Router" means the later sta
 | **Lost data** | `0%` | Share of test packets that never came back (packet loss). Anything above 0% is worth noticing. |
 | **Downloading** | `↓ 26 kbps` | Current receive rate on **this computer's interface**, not your provider's maximum. |
 | **Uploading** | `↑ 19 kbps` | Current send rate on this interface. |
-| **Wi-Fi network** | `Juice (5 GHz)` | The network name (SSID) and frequency band. |
+| **Wi-Fi network** | `Network (5 GHz)` | The network name (SSID) and frequency band. |
 
 > The download and upload figures here show **current traffic**, not capacity. They are low when you are idle. Use `--speed` for a real speed test.
 
