@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-#  NetScope 2.4 — a friendly network health console for Linux Mint
+#  NetScope 2.5 — a friendly network health console for Linux Mint
 #  (also works on other Ubuntu / Debian based desktops)
 #
 #  • Simple view   : plain-English verdict, a "journey of your data" map,
@@ -13,16 +13,12 @@
 #
 #  Run  netscope --help  to see all options.
 #
-#  What's new in 2.4
-#   - Fourteen extra exploration and status modes (see --help):
-#       --arp  --routes  --ports  --handshake  --nat  --dhcp  --channels
-#       --topology  --quiz  --course  --quick  --history  --compare  --report
-#   - Every non-JSON run is appended to ~/.local/share/netscope/history.jsonl
-#     so you can compare quality over time with --history / --compare.
-#   - --report FILE writes a sanitised Markdown report (MAC addresses and
-#     public IP removed) that is safe to share.
-#   - The program is invoked as `netscope` (no .sh suffix in commands).
-#   - Banner corrected so the figlet art clearly reads NETSCOPE.
+#  What's new in 2.5
+#   - --walk rewritten: hop table with latency and status, calculated values
+#     marked, graceful handling of missing tools and incomplete traces.
+#   - --routes explains every route and lists every match for a destination.
+#   - Fixes: point-to-point (VPN) addresses, --topology, --handshake, --nat,
+#     --channels, history file no longer stores the Wi-Fi name, exit statuses.
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -u
@@ -290,13 +286,12 @@ trap 'exit 130' INT TERM
 
 HISTORY_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/netscope"
 HISTORY_FILE="$HISTORY_DIR/history.jsonl"
-PUB_IP=""
 
 save_history() {
   mkdir -p "$HISTORY_DIR" 2>/dev/null || return 1
-  printf '{"ts":"%s","score":%d,"grade":"%s","lat_ms":"%s","loss":"%s","iface":"%s","internet":"%s","ssid":"%s"}\n' \
-    "$(date -Is 2>/dev/null)" "$SCORE" "$GRADE" \
-    "${LAT_MS:-}" "${LOSS_PCT:-}" "${LAN_IF:-}" "${INTERNET:-unknown}" "${WIFI_SSID:-}" >> "$HISTORY_FILE" 2>/dev/null
+  printf '{"ts":%s,"score":%d,"grade":%s,"lat_ms":%s,"loss":%s,"iface":%s,"internet":%s}\n' \
+    "$(json_str "$(date -Is 2>/dev/null)")" "$SCORE" "$(json_str "$GRADE")" \
+    "$(json_str "${LAT_MS:-}")" "$(json_str "${LOSS_PCT:-}")" "$(json_str "${LAN_IF:-}")" "$(json_str "${INTERNET:-unknown}")" >> "$HISTORY_FILE" 2>/dev/null
   if [[ -f "$HISTORY_FILE" ]] && (( $(wc -l < "$HISTORY_FILE") > 5000 )); then
     tail -n 1000 "$HISTORY_FILE" > "$HISTORY_FILE.tmp" && mv "$HISTORY_FILE.tmp" "$HISTORY_FILE"
   fi
@@ -616,16 +611,17 @@ job_trace() {
   printf '%s' "$tool" > "$TMP/trace.tool"
 }
 
+has_ipv4() { grep -qE '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$1"; }
 get_dns_servers() {
   local out=""
   if have resolvectl; then
     out="$(resolvectl dns "$LAN_IF" 2>/dev/null)"
-    [[ -z "$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$out")" ]] && out="$(resolvectl dns 2>/dev/null)"
+    has_ipv4 "$out" || out="$(resolvectl dns 2>/dev/null)"
   fi
-  if [[ -z "$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$out")" ]] && have nmcli && [[ -n "$LAN_IF" ]]; then
+  if ! has_ipv4 "$out" && have nmcli && [[ -n "$LAN_IF" ]]; then
     out="$(nmcli -g IP4.DNS device show "$LAN_IF" 2>/dev/null)"
   fi
-  if [[ -z "$(grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$out")" ]]; then
+  if ! has_ipv4 "$out"; then
     out="$(grep -E '^[[:space:]]*nameserver[[:space:]]+' /etc/resolv.conf 2>/dev/null)"
   fi
   grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' <<<"$out" | grep -v '^127\.' | awk '!s[$0]++' | head -n 2
@@ -816,7 +812,7 @@ evaluate() {
   fi
 
   INTERNET="UNKNOWN"; INET_VIA=""; FIRST_RC=""
-  H_RC=""; H_CODE=""; H_IP=""; H_VER=""; H_DNS=""; H_CONN=""; H_TLS=""; H_TTFB=""; H_TOTAL=""; H_FROM=""
+  H_CODE=""; H_IP=""; H_VER=""; H_DNS=""; H_CONN=""; H_TLS=""; H_TTFB=""; H_TOTAL=""; H_FROM=""
   if have curl && [[ -f "$TMP/http.rc" ]]; then
     http_read http
     if http_ok; then INTERNET=OK; H_FROM=http
@@ -828,9 +824,8 @@ evaluate() {
       else INTERNET=FAIL; fi
     fi
     if [[ "$INTERNET" == OK ]]; then
-      H_RC="$HR_RC"; H_CODE="$HR_CODE"; H_IP="$HR_IP"; H_VER="$HR_VER"; H_DNS="$HR_DNS"
+      H_CODE="$HR_CODE"; H_IP="$HR_IP"; H_VER="$HR_VER"; H_DNS="$HR_DNS"
       H_CONN="$HR_CONN"; H_TLS="$HR_TLS"; H_TTFB="$HR_TTFB"; H_TOTAL="$HR_TOTAL"
-      PUB_IP="$(trace_field "$H_FROM" ip)"
     fi
   elif (( PUB_OK )); then INTERNET=OK; INET_VIA=ping
   fi
@@ -1638,7 +1633,7 @@ live_mode() {
   (( N > 80 )) && N=80
   local -a NETH=() GWH=() RXH=() TXH=()
   title="$IFACE"
-  [[ "$LAN_TYPE" == wifi && -n "$WIFI_SSID" ]] && title="$IFACE · Wi-Fi “$WIFI_SSID”"
+  [[ "$LAN_TYPE" == wifi && -n "$WIFI_SSID" ]] && title="$IFACE · Wi-Fi \"$WIFI_SSID\""
   (( UTF8 )) || title="$IFACE"
 
   LIVE_ACTIVE=1
@@ -3031,7 +3026,7 @@ lab_channels() {
     band="?"; freq="${freq%% *}"
     if [[ "$freq" =~ ^[0-9]+$ ]]; then
       if   (( freq < 3000 )); then band="2.4"
-      elif (( freq < 5925 )); then band="5"
+      elif (( freq < 5900 )); then band="5"
       else band="6"; fi
     elif (( chan >= 1 && chan <= 14 )); then band="2.4"
     fi
@@ -3194,7 +3189,7 @@ lab_course() {
 }
 
 lab_quick() {
-  have ip || exit 1
+  have ip || { echo "NetScope needs the 'ip' command (package: iproute2)." >&2; exit 1; }
   LAN_IF=""; IFACE=""; GATEWAY=""
   detect_network
   local lat="" loss="" gw_ok=0 pub_ok=0
@@ -3237,7 +3232,7 @@ lab_history() {
     lat="$(sed -n 's/.*"lat_ms":"\([^"]*\)".*/\1/p' <<<"$line")"
     loss="$(sed -n 's/.*"loss":"\([^"]*\)".*/\1/p' <<<"$line")"
     iface="$(sed -n 's/.*"iface":"\([^"]*\)".*/\1/p' <<<"$line")"
-    printf '  %-22s %3s  %-15s %-10s %-6s %s\n' "${ts:0:19}" "${score:-?}" "${grade:-?}" "${lat:-?}ms" "${loss:-?}%" "$iface"
+    printf '  %-22s %3s  %-15s %-10s %-6s %s\n' "${ts:0:19}" "${score:-?}" "${grade:-?}" "${lat:+${lat}ms}" "${loss:+${loss}%}" "$iface"
   done < <(tail -n 20 "$HISTORY_FILE")
   printf '\n'
   note "History is stored in $HISTORY_FILE. Up to 5000 runs are kept; older entries are trimmed automatically."
@@ -3246,12 +3241,12 @@ lab_history() {
 
 lab_compare() {
   local n="${MODE_ARG:-5}"
+  if ! [[ "$n" =~ ^[0-9]+$ ]] || (( n < 1 )); then n=5; fi
   section "COMPARE (last $n runs)"
   if [[ ! -r "$HISTORY_FILE" ]]; then
     note "No history yet. Run NetScope normally to start recording."
     printf '\n'; return 0
   fi
-  if ! [[ "$n" =~ ^[0-9]+$ ]] || (( n < 1 )); then n=5; fi
   local -a SCORES=() LATS=() LOSSES=() TS=()
   local line
   while IFS= read -r line; do
@@ -3334,28 +3329,29 @@ render_report_to() {
 }
 
 run_lab() {
+  local rc=0
   case "$MODE" in
-    walk)      lab_walk ;;
-    subnet)    lab_subnet ;;
-    glossary)  lab_glossary ;;
-    dns)       lab_dns ;;
-    tls)       lab_tls ;;
-    mtu)       lab_mtu ;;
-    arp)       lab_arp ;;
-    routes)    lab_routes ;;
-    ports)     lab_ports ;;
-    handshake) lab_handshake ;;
-    nat)       lab_nat ;;
-    dhcp)      lab_dhcp ;;
-    channels)  lab_channels ;;
-    topology)  lab_topology ;;
-    quiz)      lab_quiz ;;
-    course)    lab_course ;;
-    quick)     lab_quick ;;
-    history)   lab_history ;;
-    compare)   lab_compare ;;
+    walk)      lab_walk || rc=$? ;;
+    subnet)    lab_subnet || rc=$? ;;
+    glossary)  lab_glossary || rc=$? ;;
+    dns)       lab_dns || rc=$? ;;
+    tls)       lab_tls || rc=$? ;;
+    mtu)       lab_mtu || rc=$? ;;
+    arp)       lab_arp || rc=$? ;;
+    routes)    lab_routes || rc=$? ;;
+    ports)     lab_ports || rc=$? ;;
+    handshake) lab_handshake || rc=$? ;;
+    nat)       lab_nat || rc=$? ;;
+    dhcp)      lab_dhcp || rc=$? ;;
+    channels)  lab_channels || rc=$? ;;
+    topology)  lab_topology || rc=$? ;;
+    quiz)      lab_quiz || rc=$? ;;
+    course)    lab_course || rc=$? ;;
+    quick)     lab_quick ;;   # always exits itself
+    history)   lab_history || rc=$? ;;
+    compare)   lab_compare || rc=$? ;;
   esac
-  exit 0
+  exit "$rc"
 }
 
 finish() {
