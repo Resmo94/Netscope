@@ -3375,6 +3375,68 @@ lab_quiz() {
   printf '\n  %sScore: %d / %d%s\n\n' "$BOLD" "$q_score" "$q_total" "$RESET"
 }
 
+lab_roadmap() {
+  LAN_IF=""; IFACE=""; GATEWAY=""
+  detect_network; wifi_gather
+  section "NETWORKING ROADMAP — LEVEL 1 TO 101"
+  wrap "The four-stage plan from the learning document, with the resources that matter and a snapshot of your own network at each stage. Use --learn N to read any stage in full." "$DIM"
+  printf '\n'
+
+  local addr="" pfx="" pub=""
+  if learn_my_net; then addr="$LEARN_ADDR"; pfx="$LEARN_PFX"; fi
+  if have curl; then
+    pub="$(curl -4 -sS --max-time 4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p' | head -n1)"
+  fi
+
+  sub "Stage 1 — How networks actually work  (LVL 1–25)"
+  kv "Concept"  "IP addressing · OSI/TCP-IP · host, switch, router"
+  kv "Spine"    "Practical Networking Module 1 (14 lessons, free)"
+  kv "Second angle" "NetworkChuck CCNA series · Professor Messer Network+"
+  kv "Your data" "${addr:-no IPv4}/${pfx:-?} on ${LAN_IF:-?}, gateway ${GATEWAY:-?}, ${LAN_TYPE:-?}"
+  try_cmd "netscope --learn 1"
+  try_cmd "netscope --osi"
+
+  sub "Stage 2 — Segmentation & core services  (LVL 26–50)"
+  kv "Concept"  "VLANs · routing · DNS · DHCP · NAT · Wi-Fi security"
+  kv "Spine"    "Practical Networking Module 2 (18 lessons)"
+  kv "Second angle" "Jeremy's IT Lab · David Bombal CCNA labs"
+  kv "Your data" "DNS ${DNS_AVG:-?} ms avg; Wi-Fi ${WIFI_SSID:-n/a} (${WIFI_SEC:-?})"
+  try_cmd "netscope --learn 2"
+  try_cmd "netscope --routes 8.8.8.8"
+
+  sub "Stage 3 — VPNs & exposed services  (LVL 51–75)"
+  kv "Concept"  "Subnetting in your head · NAT deep dive · VPNs · reverse proxy + TLS"
+  kv "Spine"    "Practical Networking Module 3 (11 lessons); Module 4 in progress"
+  kv "Second angle" "Lawrence Systems (pfSense/OPNsense) · WireGuard docs · NetworkChuck"
+  kv "Your data" "private ${addr:-?}, public ${pub:-?}, MTU path runnable"
+  try_cmd "netscope --learn 3"
+  try_cmd "netscope --nat  &&  netscope --tls example.com"
+
+  sub "Stage 4 — Enterprise-grade design  (LVL 76–101)"
+  kv "Concept"  "High availability · monitoring · automation"
+  kv "Spine"    "Whatever PracNet releases next · CCNP-level playlists"
+  kv "Second angle" "Proxmox docs · Prometheus + Grafana · Ansible (Learn Linux TV)"
+  kv "Your data" "errors ${ERR_PCT:-0}% (+${ERR_NEW:-0}), drops ${DROP_PCT:-0}%"
+  try_cmd "netscope --learn 4"
+  try_cmd "netscope --advanced"
+
+  printf '\n'
+  sub "Lab ladder (Proxmox)"
+  kv "1" "Segment the network (OPNsense + VLANs: trusted, IoT, guest, lab)"
+  kv "2" "Self-host the core (Pi-hole/AdGuard, reverse proxy with auto-TLS, Vaultwarden)"
+  kv "3" "Replace port-forwarding with WireGuard"
+  kv "4" "Isolated attack range (Kali + DVWA/Juice Shop on the lab VLAN)"
+  kv "5" "Visibility (Wireshark, Wazuh, Suricata)"
+  kv "6" "Automate & harden (Ansible, fail2ban/CrowdSec, 3-2-1 backups, Proxmox HA)"
+  printf '\n'
+  sub "Cert ladder (optional signposts)"
+  printf '  A+ %s→%s Network+ %s→%s Security+ %s→%s CCNA (parallel) %s→%s CySA+ / PenTest+ %s→%s OSCP / CCNP\n' \
+    "$GRAY" "$RESET" "$GRAY" "$RESET" "$GRAY" "$RESET" "$GRAY" "$RESET" "$GRAY" "$RESET"
+  printf '\n'
+  note "The Proxmox box and the labs are where the skill gets built. Levels are a rough sense of progression, not a strict checklist."
+  printf '\n'
+}
+
 lab_course() {
   section "COURSE MAP"
   wrap "Each row is a networking topic and the NetScope command that demonstrates it on YOUR network."
