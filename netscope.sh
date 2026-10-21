@@ -19,6 +19,17 @@
 #   - --routes explains every route and lists every match for a destination.
 #   - Fixes: point-to-point (VPN) addresses, --topology, --handshake, --nat,
 #     --channels, history file no longer stores the Wi-Fi name, exit statuses.
+#
+#  What's new in 2.4
+#   - Fourteen extra exploration and status modes (see --help):
+#       --walk  --arp  --routes  --ports  --handshake  --nat  --dhcp  --channels
+#       --topology  --quiz  --course  --quick  --history  --compare  --report
+#   - Every non-JSON run is appended to ~/.local/share/netscope/history.jsonl
+#     so you can compare quality over time with --history / --compare.
+#   - --report FILE writes a sanitised Markdown report (MAC addresses, BSSIDs and
+#     public IP removed; the Wi-Fi name and private address remain).
+#   - The program is invoked as `netscope` (no .sh suffix in commands).
+#   - Banner corrected so the figlet art clearly reads NETSCOPE.
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -u
@@ -999,6 +1010,8 @@ evaluate() {
   elif (( SCORE >= 55 )); then GRADE="NEEDS ATTENTION"; FACE='(o_o;)';  VERDICT="It works, but something needs attention.";  GCOL="$YELLOW"
   else                         GRADE="POOR";            FACE='(T_T)';   VERDICT="There is a problem with your connection.";  GCOL="$RED"; fi
   (( SCORE < 55 )) && [[ "$INTERNET" == OK ]] && VERDICT="The internet is reachable, but quality is poor."
+  if (( SCORE >= 90 && ${#PEN[@]} > 0 )); then FACE='(^_^)'; VERDICT="Working great, with one small thing to look at."; fi
+  if [[ "$INTERNET" == PARTIAL ]] && (( SCORE >= 55 )); then FACE='(o_o;)'; VERDICT="Pings work, but the web test failed."; fi
   diagnose
   rate_activities
   make_tips
@@ -1359,7 +1372,7 @@ adv_link() {
   [[ "$drv" == "." || "$drv" == "/" ]] && drv=""
   kv "Type / driver" "$LAN_TYPE${drv:+ / $drv}"
   kv "MAC address" "$(rd "$NETSYS/$LAN_IF/address")"
-  kv "MTU" "$(rd "$NETSYS/$LAN_IF/mtu")"
+  kv "MTU" "$(v="$(rd "$NETSYS/$LAN_IF/mtu")"; printf '%s' "${v:-n/a}")"
   flags="$(ip -o link show dev "$LAN_IF" 2>/dev/null | grep -oE '<[^>]*>' | head -n1)"
   kv "Flags / state" "${flags:-?} / ${OPERSTATE:-?}"
   if [[ "$LAN_TYPE" == wired ]]; then
@@ -1373,7 +1386,7 @@ adv_link() {
     kv "Link speed / duplex" "${sp:-unknown} / ${dup:-unknown}"
     kv "Cable (carrier)" "$([[ "$CARRIER" == 1 ]] && echo 'link detected' || echo 'no link')"
   fi
-  [[ -n "$VPN_IF" ]] && kv "VPN interface" "$VPN_IF ($(rd "$NETSYS/$VPN_IF/operstate"))"
+  [[ -n "$VPN_IF" ]] && kv "VPN interface" "$VPN_IF ($(v="$(rd "$NETSYS/$VPN_IF/operstate")"; printf '%s' "${v:-state unknown}"))"
   printf '\n'
   ip -brief address show dev "$LAN_IF" 2>/dev/null | sed 's/^/  /'
 
@@ -1499,7 +1512,7 @@ adv_web() {
     [[ -s "$TMP/http.err" ]] && printf '  %s%s%s\n' "$DIM" "$(head -n1 "$TMP/http.err")" "$RESET"
   fi
   kv "IPv6" "$(( IPV6_OK )) = $( (( IPV6_OK )) && echo "reachable (${IPV6_ADDR:-?})" || echo 'not reachable')"
-  [[ -n "${http_proxy:-}${https_proxy:-}${HTTP_PROXY:-}${HTTPS_PROXY:-}" ]] && kv "Proxy variables" "${https_proxy:-${HTTPS_PROXY:-${http_proxy:-${HTTP_PROXY:-}}}}"
+  [[ -n "${http_proxy:-}${https_proxy:-}${HTTP_PROXY:-}${HTTPS_PROXY:-}" ]] && kv "Proxy variables" "$(sed 's#//[^/@]*@#//***@#' <<<"${https_proxy:-${HTTPS_PROXY:-${http_proxy:-${HTTP_PROXY:-}}}}")"
 }
 adv_path() {
   [[ -s "$TMP/trace.txt" ]] || return 0
@@ -2486,7 +2499,7 @@ lab_walk() {
     read -r h a r _ flag rch <<<"${HOPS[k]}"
     bar=""; lat="-"; pad="  "; role=""
     if [[ "$a" == "?" ]]; then
-      st=INFO; role="no reply (common, not an error)"; a="*"
+      st=INFO; role="no reply"; a="*"
     else
       st=OK
       [[ "$r" =~ ^[0-9.]+$ ]] && lat="$(fmt_ms "$r")"
@@ -2528,7 +2541,7 @@ lab_walk() {
     && wnote "Hop 1 ($first_a) differs from the next hop in your routing table ($nh). The trace may have seen a different device; the reason is not determined here."
   [[ -n "$priv_list" ]] && wnote "Another private-range router at hop(s) $priv_list: often double NAT or an ISP-internal network. This is a hint from the addresses only."
   wnote "LATENCY is the measured round trip of each probe. Routers often answer probes slowly, so one slow hop followed by fast ones is usually harmless."
-  wnote "REPLY describes the probe's answer, not the health of your traffic. WARN = slow (150 ms or more, or +80 ms over the previous hop)."
+  wnote "REPLY describes the probe's answer, not the health of your traffic. INFO (no reply) is common: many routers ignore probes. WARN = slow (150 ms or more, or +80 ms over the previous hop)."
 
   walk_step "What changes at each hop"
   printf '  %s%-8s %-16s %-6s %s%s\n' "$GRAY" "FROM" "TO" "TTL*" "MAC PAIR ON THAT LINK" "$RESET"
@@ -3386,7 +3399,7 @@ main() {
     else printf '  Speed test skipped: it needs both curl and ping.\n' >&2; fi
   fi
   evaluate
-  save_history
+  (( JSON )) || save_history
   t_end="$(now_ms)"
 
   if (( JSON )); then
@@ -3418,12 +3431,12 @@ main() {
     render_advanced
   fi
 
-  printf '\n  %sNetScope %s%s' "$DIM" "$VERSION" "$RESET"
-  if (( ! do_adv && ! PROMPT )); then printf '%s  %s  use --advanced for the technical view%s' "$DIM" "$G_MID" "$RESET"; fi
-  (( SPEED )) || printf '%s  %s  --speed measures download/upload%s' "$DIM" "$G_MID" "$RESET"
-  (( LEARN )) || printf '%s  %s  --learn explains each step%s' "$DIM" "$G_MID" "$RESET"
-  printf '%s  %s  --walk DEST follows a packet%s' "$DIM" "$G_MID" "$RESET"
-  printf '%s  %s  --live for a live monitor%s\n\n' "$DIM" "$G_MID" "$RESET"
+  local hint="NetScope $VERSION"
+  (( ! do_adv && ! PROMPT )) && hint+="  $G_MID  use --advanced for the technical view"
+  (( SPEED )) || hint+="  $G_MID  --speed measures download/upload"
+  (( LEARN )) || hint+="  $G_MID  --learn explains each step"
+  hint+="  $G_MID  --walk DEST follows a packet  $G_MID  --live for a live monitor"
+  printf '\n'; wrap "$hint" "$DIM"; printf '\n'
   finish
 }
 
