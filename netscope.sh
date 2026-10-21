@@ -107,7 +107,7 @@ USAGE
 }
 
 ADVANCED=0; PROMPT=1; SPEED=0; LIVE=0; JSON=0; OPT_NOCOLOR=0; OPT_ASCII=0
-LEARN=0; OSI=0; MODE=""; MODE_ARG=""; OPT_VAL=""; REPORT_FILE=""
+LEARN=0; OSI=0; MODE=""; MODE_ARG=""; OPT_VAL=""; REPORT_FILE=""; LEARN_STAGE=""
 take_arg() {
   if [[ -n "${1:-}" && "${1:0:1}" != - ]]; then OPT_VAL="$1"; return 0; fi
   OPT_VAL=""; return 1
