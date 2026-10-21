@@ -27,7 +27,7 @@
 #     and cert ladder.
 #   - --course extended with the new learning modes.
 #
-#  What's new in 2.5
+#  What's new in 2.6
 #   - --walk rewritten: hop table with latency and status, calculated values
 #     marked, graceful handling of missing tools and incomplete traces.
 #   - --routes explains every route and lists every match for a destination.
@@ -1839,7 +1839,7 @@ learn_stage2() {
   try_cmd "netscope --dhcp"
   learn_resource "Practical Networking Module 2"
 
-  lblock "2.5  NAT" "why the internet still works on IPv4" \
+  lblock "2.6  NAT" "why the internet still works on IPv4" \
     "NAT rewrites addresses in the IP header. Source NAT (SNAT) hides your private address behind a public one on the way out. PAT / NAT overload is many-to-one: many internal connections share one public address, distinguished by source port. Destination NAT (DNAT) is port forwarding on the way in: 'traffic to public_ip:443 -> internal 10.0.0.5:443'. NAT breaks true end-to-end reachability, which is why inbound services need explicit port-forwarding, why some protocols that embed addresses (SIP, FTP, some games) misbehave, and why CGNAT - your ISP NATing you again - makes port-forwarding impossible unless you can ask the ISP for a public address."
   local nat_pub
   if have curl; then
