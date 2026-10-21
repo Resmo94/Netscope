@@ -3444,6 +3444,12 @@ lab_course() {
   printf '  %s%-24s %-34s%s\n' "$BOLD" "TOPIC" "COMMAND" "$RESET"
   printf '  %s\n' "$(rep "$G_H" 60)"
   local rows=(
+    "Full curriculum|netscope --learn"
+    "Stage 1: how it works|netscope --learn 1"
+    "Stage 2: segmentation|netscope --learn 2"
+    "Stage 3: VPNs & TLS|netscope --learn 3"
+    "Stage 4: enterprise|netscope --learn 4"
+    "Study plan + resources|netscope --roadmap"
     "OSI model|netscope --osi"
     "Subnetting|netscope --subnet"
     "ARP|netscope --arp"
@@ -3467,7 +3473,7 @@ lab_course() {
     printf '  %-24s %s%s%s\n' "$topic" "$CYAN" "$cmd" "$RESET"
   done
   printf '\n'
-  note "Start with --osi for the big picture, then --walk for the packet's journey. The rest fill in the details."
+  note "Start with --roadmap for the plan, then --learn 1..4 for each stage, then --walk for the packet's journey. The rest fill in the details."
   printf '\n'
 }
 
