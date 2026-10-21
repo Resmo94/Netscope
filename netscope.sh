@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-#  NetScope 2.5 — a friendly network health console for Linux Mint
+#  NetScope 2.6 — a friendly network health console for Linux Mint
 #  (also works on other Ubuntu / Debian based desktops)
 #
 #  • Simple view   : plain-English verdict, a "journey of your data" map,
@@ -13,27 +13,30 @@
 #
 #  Run  netscope --help  to see all options.
 #
+#  What's new in 2.6
+#   - --learn rewritten into a four-stage curriculum modelled on the
+#     "Linux · Networking · Cybersecurity — Level 1 to 101" study document:
+#       Stage 1  How networks actually work        (LVL 1–25)
+#       Stage 2  Segmentation & core services      (LVL 26–50)
+#       Stage 3  VPNs & exposed services           (LVL 51–75)
+#       Stage 4  Enterprise-grade design           (LVL 76–101)
+#     Each stage has worked examples on the user's own network, the command
+#     that demonstrates it, and the resource that teaches it.
+#   - New --learn STAGE (1-4) to focus on a single stage.
+#   - New --roadmap: the four-stage study plan with resources, lab ladder
+#     and cert ladder.
+#   - --course extended with the new learning modes.
+#
 #  What's new in 2.5
 #   - --walk rewritten: hop table with latency and status, calculated values
 #     marked, graceful handling of missing tools and incomplete traces.
 #   - --routes explains every route and lists every match for a destination.
 #   - Fixes: point-to-point (VPN) addresses, --topology, --handshake, --nat,
 #     --channels, history file no longer stores the Wi-Fi name, exit statuses.
-#
-#  What's new in 2.4
-#   - Fourteen extra exploration and status modes (see --help):
-#       --walk  --arp  --routes  --ports  --handshake  --nat  --dhcp  --channels
-#       --topology  --quiz  --course  --quick  --history  --compare  --report
-#   - Every non-JSON run is appended to ~/.local/share/netscope/history.jsonl
-#     so you can compare quality over time with --history / --compare.
-#   - --report FILE writes a sanitised Markdown report (MAC addresses, BSSIDs and
-#     public IP removed; the Wi-Fi name and private address remain).
-#   - The program is invoked as `netscope` (no .sh suffix in commands).
-#   - Banner corrected so the figlet art clearly reads NETSCOPE.
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -u
-VERSION="2.5"
+VERSION="2.6"
 
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
   echo "NetScope needs bash 4.4 or newer." >&2
@@ -68,7 +71,8 @@ NetScope - a friendly network health console
 LEARNING TOOLS  (all read-only)
   netscope --walk DEST        Follow one packet to DEST (name or IPv4), hop by hop
                               (sends one ping and a short tracepath toward DEST)
-  netscope --learn            Add a plain-language explanation of every step
+  netscope --learn [STAGE]    Deep curriculum; STAGE 1-4 or blank for all
+  netscope --roadmap          The four-stage study plan with resources
   netscope --osi              Show your results on the seven OSI layers
   netscope --subnet [CIDR]    Subnet calculator (your own network if no CIDR given)
   netscope --dns DOMAIN       Explore DNS: caching, record types, reverse DNS, trace
@@ -107,7 +111,8 @@ USAGE
 }
 
 ADVANCED=0; PROMPT=1; SPEED=0; LIVE=0; JSON=0; OPT_NOCOLOR=0; OPT_ASCII=0
-LEARN=0; OSI=0; MODE=""; MODE_ARG=""; OPT_VAL=""; REPORT_FILE=""; LEARN_STAGE=""
+LEARN=0; OSI=0; MODE=""; MODE_ARG=""; OPT_VAL=""; REPORT_FILE=""
+LEARN_STAGE=""
 take_arg() {
   if [[ -n "${1:-}" && "${1:0:1}" != - ]]; then OPT_VAL="$1"; return 0; fi
   OPT_VAL=""; return 1
@@ -125,7 +130,8 @@ while (( $# )); do
     -n|--no-prompt)         PROMPT=0 ;;
     --no-color|--no-colour) OPT_NOCOLOR=1 ;;
     --ascii)                OPT_ASCII=1 ;;
-    --learn)                LEARN=1 ;;
+    --learn)                LEARN=1; take_arg "${1:-}" && shift; LEARN_STAGE="$OPT_VAL" ;;
+    --roadmap)              MODE=roadmap ;;
     --osi)                  OSI=1 ;;
     --walk)                 MODE=walk;      need_arg --walk "a destination, for example: --walk 8.8.8.8" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
     --subnet)               MODE=subnet;    take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
@@ -1748,11 +1754,11 @@ learn_resource() {
 
 # ─── STAGE 1 ─────────────────────────────────────────────────────────────────
 learn_stage1() {
-  section "STAGE 1 — HOW NETWORKS ACTUALLY WORK  (LVL 1–25)"
-  wrap "Goal: understand what an IP address is, what the OSI/TCP-IP model is for, and what a host, switch and router each do — using your own network as the example." "$DIM"
+  section "STAGE 1 - HOW NETWORKS ACTUALLY WORK  (LVL 1-25)"
+  wrap "Goal: understand what an IP address is, what the OSI/TCP-IP model is for, and what a host, switch and router each do - using your own network as the example." "$DIM"
 
   lblock "1.1  The address" "one of the two or three ideas that make networking click" \
-    "An IPv4 address is a 32-bit number, written as four decimal octets separated by dots. Each octet is 8 bits, so each one is 0–255 (2^8 = 256 values). That is the whole address — no hidden fields. 192.168.1.10 is 11000000.10101000.00000001.00001010 in binary."
+    "An IPv4 address is a 32-bit number, written as four decimal octets separated by dots. Each octet is 8 bits, so each one is 0-255 (2^8 = 256 values). That is the whole address - no hidden fields. 192.168.1.10 is 11000000.10101000.00000001.00001010 in binary."
   if learn_my_net; then
     kv "Your address"   "$LEARN_ADDR/$LEARN_PFX"
     kv "In binary"      "$(bin_ip "$LEARN_INT")"
@@ -1764,17 +1770,17 @@ learn_stage1() {
   fi
   try_cmd "ip -br address"
   try_cmd "netscope --subnet"
-  learn_resource "Practical Networking Module 1 · Linux Journey (linuxjourney.com)"
+  learn_resource "Practical Networking Module 1  /  Linux Journey (linuxjourney.com)"
 
   lblock "1.2  The layers" "why people say 'layer 2' and 'layer 3'" \
-    "Networks are built in layers because each layer solves a different problem: how to put bits on a wire, how to get them across a room, how to get them across the world, what to do when a page is lost. Each layer adds its own header and treats the layer above it as an opaque payload. OSI has seven layers; TCP/IP has four; the usual mapping is: L1–2 (Ethernet, Wi-Fi) → L3 (IP, ICMP) → L4 (TCP, UDP) → L5–7 (TLS, HTTP, DNS)."
+    "Networks are built in layers because each layer solves a different problem: how to put bits on a wire, how to get them across a room, how to get them across the world, what to do when a page is lost. Each layer adds its own header and treats the layer above it as an opaque payload. OSI has seven layers; TCP/IP has four; the usual mapping is: L1-2 (Ethernet, Wi-Fi) -> L3 (IP, ICMP) -> L4 (TCP, UDP) -> L5-7 (TLS, HTTP, DNS)."
   wrap "The payload of one layer is the whole message of the layer above it. A web request becomes a TCP segment (TCP header added), an IP packet (IP header added), then an Ethernet or Wi-Fi frame (MAC header added), then bits. This is encapsulation, and the reverse is decapsulation. The unit at each layer has a name: frame, packet, segment, data." "$DIM"
   wrap "Why this matters: layers let you swap Wi-Fi for Ethernet without changing TCP, and IPv4 for IPv6 without changing HTTP. It also means a fault at a lower layer breaks everything above it, so troubleshooting always runs bottom-up." "$DIM"
   try_cmd "netscope --osi"
   learn_resource "Practical Networking Module 1 (OSI and encapsulation)"
 
   lblock "1.3  The devices" "hub vs switch vs router" \
-    "A hub is a repeater: every frame goes out every other port, so all devices share one collision domain. Obsolete. A switch is smarter — it learns which MAC address lives on which port (the CAM table) and forwards each frame only to that port. It breaks the collision domain per port but keeps one broadcast domain. A router connects DIFFERENT networks: it receives a frame, strips it, looks up the destination IP in its routing table, and builds a NEW frame for the next hop. Routers break broadcast domains. A Wi-Fi access point is a switch over radio, plus association and authentication on top."
+    "A hub is a repeater: every frame goes out every other port, so all devices share one collision domain. Obsolete. A switch is smarter - it learns which MAC address lives on which port (the CAM table) and forwards each frame only to that port. It breaks the collision domain per port but keeps one broadcast domain. A router connects DIFFERENT networks: it receives a frame, strips it, looks up the destination IP in its routing table, and builds a NEW frame for the next hop. Routers break broadcast domains. A Wi-Fi access point is a switch over radio, plus association and authentication on top."
   if [[ -n "$LAN_IF" ]]; then
     local gw_mac
     gw_mac="$(ip neigh show "$GATEWAY" 2>/dev/null | awk '{ for(i=1;i<=NF;i++) if($i=="lladdr"){print $(i+1); exit} }')"
@@ -1793,18 +1799,18 @@ learn_stage1() {
   learn_resource "Practical Networking 'life of a packet'"
 
   lblock "1.5  What this stage lets you do" "checkpoint" \
-    "You can read an address and a mask and say what is local and what is remote. You can read a routing table and say which route wins. You can follow a packet to the first hop and explain TTL. You can diagnose 'no internet' by pinging the gateway, then 1.1.1.1, then example.com — the first 'no' is where the fault is."
+    "You can read an address and a mask and say what is local and what is remote. You can read a routing table and say which route wins. You can follow a packet to the first hop and explain TTL. You can diagnose 'no internet' by pinging the gateway, then 1.1.1.1, then example.com - the first 'no' is where the fault is."
   try_cmd "netscope --walk 1.1.1.1"
   try_cmd "netscope --quiz"
 }
 
 # ─── STAGE 2 ─────────────────────────────────────────────────────────────────
 learn_stage2() {
-  section "STAGE 2 — SEGMENTATION & CORE SERVICES  (LVL 26–50)"
-  wrap "Goal: stop thinking of your home network as one flat blob, and understand the services that make it work — routing, DNS, DHCP, NAT, and Wi-Fi security." "$DIM"
+  section "STAGE 2 - SEGMENTATION & CORE SERVICES  (LVL 26-50)"
+  wrap "Goal: stop thinking of your home network as one flat blob, and understand the services that make it work - routing, DNS, DHCP, NAT, and Wi-Fi security." "$DIM"
 
   lblock "2.1  VLANs" "separate networks on one physical switch" \
-    "A managed switch can put each port into a VLAN — a logical LAN. Frames between VLANs carry a 4-byte 802.1Q tag identifying which VLAN they belong to. An access port belongs to one VLAN and sends untagged frames; a trunk port carries several VLANs at once, tagged, usually toward a router, another switch, or a Wi-Fi AP. The router then has one logical interface per VLAN and routes between them. Why bother: IoT devices are notoriously insecure, guests should not see your NAS, and a deliberately vulnerable lab VM should never be able to talk to your laptop."
+    "A managed switch can put each port into a VLAN - a logical LAN. Frames between VLANs carry a 4-byte 802.1Q tag identifying which VLAN they belong to. An access port belongs to one VLAN and sends untagged frames; a trunk port carries several VLANs at once, tagged, usually toward a router, another switch, or a Wi-Fi AP. The router then has one logical interface per VLAN and routes between them. Why bother: IoT devices are notoriously insecure, guests should not see your NAS, and a deliberately vulnerable lab VM should never be able to talk to your laptop."
   if have ip; then
     local nv
     nv="$(ip -d link show 2>/dev/null | grep -c 'vlan\|bridge')"
@@ -1812,13 +1818,13 @@ learn_stage2() {
   fi
   try_cmd "ip -d link show"
   try_cmd "bridge vlan show"
-  learn_resource "Practical Networking 'Network Segmentation' · Lawrence Systems (OPNsense/pfSense)"
+  learn_resource "Practical Networking 'Network Segmentation'  /  Lawrence Systems (OPNsense/pfSense)"
 
   lblock "2.2  Routing, properly" "the table is the point" \
-    "A routing table is a list of (prefix, next-hop, interface, metric). For each packet the kernel picks the route with the LONGEST prefix match — the most specific one. The default route is just 0.0.0.0/0: the longest match by definition, and the fallback for everything else. Connected routes (proto kernel) are added automatically when an interface gets an IP; static routes are added by an admin; dynamic protocols (OSPF, BGP) exist for large networks. Home labs almost always use static + default. The order of lines in the table does not matter — the prefix length does."
+    "A routing table is a list of (prefix, next-hop, interface, metric). For each packet the kernel picks the route with the LONGEST prefix match - the most specific one. The default route is just 0.0.0.0/0: the longest match by definition, and the fallback for everything else. Connected routes (proto kernel) are added automatically when an interface gets an IP; static routes are added by an admin; dynamic protocols (OSPF, BGP) exist for large networks. Home labs almost always use static + default. The order of lines in the table does not matter - the prefix length does."
   try_cmd "netscope --routes 8.8.8.8"
   try_cmd "ip route show"
-  learn_resource "Practical Networking Module 3 · Jeremy's IT Lab"
+  learn_resource "Practical Networking Module 3  /  Jeremy's IT Lab"
 
   lblock "2.3  DNS" "the most common 'the internet is down'" \
     "DNS turns names into IPs and is a hierarchy: the root servers know who runs each TLD, each TLD knows who runs each domain, and the domain's own name servers know the answer. A recursive resolver (usually your router, or 1.1.1.1, or your ISP) does the walking on your behalf. Answers are cached and each one carries a TTL in seconds. Record types you will meet: A (IPv4), AAAA (IPv6), CNAME (alias), MX (mail), NS (delegation), TXT (SPF, verification), SOA (zone metadata), PTR (reverse). DNS is normally UDP/53; large answers and zone transfers use TCP/53."
@@ -1826,15 +1832,15 @@ learn_stage2() {
   kv "Average lookup"   "${DNS_AVG:-?} ms"
   kv "Failure mode"     "users report 'no internet' when only DNS is broken"
   try_cmd "netscope --dns example.com"
-  learn_resource "Practical Networking Module 1 (protocols) · Julia Evans' DNS zine"
+  learn_resource "Practical Networking Module 1 (protocols)  /  Julia Evans' DNS zine"
 
   lblock "2.4  DHCP" "how your computer got its address" \
-    "DHCP is a four-step conversation: Discover (client broadcasts 'any DHCP server?'), Offer (server offers an address + options), Request (client asks for that one), Ack (server confirms). The server hands over the IP, prefix, default gateway, DNS servers, and a lease time. The client renews at half the lease, rebinds at seven-eighths, and if no server answers at all, it self-assigns a 169.254.x.x address (APIPA) — which is why seeing 169.254 means DHCP failed, not that the internet is down."
+    "DHCP is a four-step conversation: Discover (client broadcasts 'any DHCP server?'), Offer (server offers an address + options), Request (client asks for that one), Ack (server confirms). The server hands over the IP, prefix, default gateway, DNS servers, and a lease time. The client renews at half the lease, rebinds at seven-eighths, and if no server answers at all, it self-assigns a 169.254.x.x address (APIPA) - which is why seeing 169.254 means DHCP failed, not that the internet is down."
   try_cmd "netscope --dhcp"
   learn_resource "Practical Networking Module 2"
 
   lblock "2.5  NAT" "why the internet still works on IPv4" \
-    "NAT rewrites addresses in the IP header. Source NAT (SNAT) hides your private address behind a public one on the way out. PAT / NAT overload is many-to-one: many internal connections share one public address, distinguished by source port. Destination NAT (DNAT) is port forwarding on the way in: 'traffic to public_ip:443 → internal 10.0.0.5:443'. NAT breaks true end-to-end reachability, which is why inbound services need explicit port-forwarding, why some protocols that embed addresses (SIP, FTP, some games) misbehave, and why CGNAT — your ISP NATing you again — makes port-forwarding impossible unless you can ask the ISP for a public address."
+    "NAT rewrites addresses in the IP header. Source NAT (SNAT) hides your private address behind a public one on the way out. PAT / NAT overload is many-to-one: many internal connections share one public address, distinguished by source port. Destination NAT (DNAT) is port forwarding on the way in: 'traffic to public_ip:443 -> internal 10.0.0.5:443'. NAT breaks true end-to-end reachability, which is why inbound services need explicit port-forwarding, why some protocols that embed addresses (SIP, FTP, some games) misbehave, and why CGNAT - your ISP NATing you again - makes port-forwarding impossible unless you can ask the ISP for a public address."
   local nat_pub
   if have curl; then
     nat_pub="$(curl -4 -sS --max-time 5 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p' | head -n1)"
@@ -1844,7 +1850,7 @@ learn_stage2() {
   learn_resource "Practical Networking 'NAT illustrated'"
 
   lblock "2.6  Wi-Fi security" "WPA2, WPA3, and why open Wi-Fi is a trap" \
-    "WEP is broken — do not use it. WPA2-PSK derives a key from the passphrase and the SSID, then runs a 4-way handshake with each client to derive a per-client key. An attacker who captures that handshake can mount an offline dictionary attack against a weak passphrase, which is why passphrase strength actually matters. WPA2-Enterprise replaces the shared passphrase with 802.1X and a RADIUS server, so every user has their own credentials. WPA3-PSK uses SAE (the 'Dragonfly' handshake), which is resistant to offline dictionary attacks. Open Wi-Fi has no encryption at all; a captive portal is only a redirect on top of an unencrypted link. Even on WPA2, someone who knows the PSK and captures your handshake can decrypt your Wi-Fi frames — which is why HTTPS is still the layer that protects you."
+    "WEP is broken - do not use it. WPA2-PSK derives a key from the passphrase and the SSID, then runs a 4-way handshake with each client to derive a per-client key. An attacker who captures that handshake can mount an offline dictionary attack against a weak passphrase, which is why passphrase strength actually matters. WPA2-Enterprise replaces the shared passphrase with 802.1X and a RADIUS server, so every user has their own credentials. WPA3-PSK uses SAE (the 'Dragonfly' handshake), which is resistant to offline dictionary attacks. Open Wi-Fi has no encryption at all; a captive portal is only a redirect on top of an unencrypted link. Even on WPA2, someone who knows the PSK and captures your handshake can decrypt your Wi-Fi frames - which is why HTTPS is still the layer that protects you."
   kv "Your Wi-Fi"       "${WIFI_SSID:-n/a}  (${WIFI_BAND:-?}, ch ${WIFI_CHAN:-?}, ${WIFI_SIGNAL:-?} dBm)"
   kv "Security"         "${WIFI_SEC:-see: nmcli -f SSID,SECURITY device wifi list}"
   try_cmd "netscope --channels"
@@ -1857,34 +1863,34 @@ learn_stage2() {
 
 # ─── STAGE 3 ─────────────────────────────────────────────────────────────────
 learn_stage3() {
-  section "STAGE 3 — VPNs & EXPOSED SERVICES  (LVL 51–75)"
+  section "STAGE 3 - VPNs & EXPOSED SERVICES  (LVL 51-75)"
   wrap "Goal: do subnetting in your head, understand NAT enough to design around it, and reach your own services safely without forwarding every port." "$DIM"
 
   lblock "3.1  Subnetting in your head" "the numbers worth memorising" \
-    "Know the powers of two up to 32. A /24 has 256 addresses; each extra bit halves it: /25 = 128, /26 = 64, /27 = 32, /28 = 16, /29 = 8, /30 = 4, /31 = 2, /32 = 1. Usable hosts are total minus 2 (network + broadcast) — except /31 (RFC 3021, point-to-point, both usable) and /32 (single host). The common masks: 255.255.255.0 = /24, .128 = /25, .192 = /26, .224 = /27, .240 = /28, .248 = /29, .252 = /30."
-  wrap "Mental trick: for a /N, networks step by 2^(32-N). For 10.20.30.45/27, the step is 32, so networks are 10.20.30.0, .32, .64, .96… 45 falls in .32–.63. Network .32, broadcast .63, usable .33–.62. Once you can do this you can read any address in the wild without a calculator." "$DIM"
+    "Know the powers of two up to 32. A /24 has 256 addresses; each extra bit halves it: /25 = 128, /26 = 64, /27 = 32, /28 = 16, /29 = 8, /30 = 4, /31 = 2, /32 = 1. Usable hosts are total minus 2 (network + broadcast) - except /31 (RFC 3021, point-to-point, both usable) and /32 (single host). The common masks: 255.255.255.0 = /24, .128 = /25, .192 = /26, .224 = /27, .240 = /28, .248 = /29, .252 = /30."
+  wrap "Mental trick: for a /N, networks step by 2^(32-N). For 10.20.30.45/27, the step is 32, so networks are 10.20.30.0, .32, .64, .96... 45 falls in .32-.63. Network .32, broadcast .63, usable .33-.62. Once you can do this you can read any address in the wild without a calculator." "$DIM"
   if learn_my_net; then
     local size; size=$(( 1 << (32 - LEARN_PFX) ))
     kv "Your subnet"  "$(int2ip "$LEARN_NET")/$LEARN_PFX   ($size addresses)"
-    kv "Range"        "$(int2ip "$LEARN_NET")  →  $(int2ip $(( LEARN_NET + size - 1 )))"
+    kv "Range"        "$(int2ip "$LEARN_NET")  ->  $(int2ip $(( LEARN_NET + size - 1 )))"
   fi
   try_cmd "netscope --subnet 10.0.0.1/8"
   try_cmd "netscope --subnet 172.16.5.9/20"
-  learn_resource "Practical Networking Module 3 (subnetting mastery) · Professor Messer (free Network+)"
+  learn_resource "Practical Networking Module 3 (subnetting mastery)  /  Professor Messer (free Network+)"
 
   lblock "3.2  NAT deep dive" "SNAT, DNAT, PAT, hairpin, CGNAT" \
-    "SNAT rewrites the source and is what outbound traffic uses. DNAT rewrites the destination and is what inbound port-forwarding uses. PAT is many-to-one NAT: the router tracks (internal_ip:port) against (public_ip:translated_port) so it can tell replies apart. Static NAT is one-to-one. Hairpin NAT is a client on the inside reaching an inside server via its public address — the router has to translate out and then back in, and some routers refuse. CGNAT (address range 100.64.0.0/10) means your ISP is NATing you a second time, so you cannot port-forward at all. Double NAT is the same thing but with your own second router."
+    "SNAT rewrites the source and is what outbound traffic uses. DNAT rewrites the destination and is what inbound port-forwarding uses. PAT is many-to-one NAT: the router tracks (internal_ip:port) against (public_ip:translated_port) so it can tell replies apart. Static NAT is one-to-one. Hairpin NAT is a client on the inside reaching an inside server via its public address - the router has to translate out and then back in, and some routers refuse. CGNAT (address range 100.64.0.0/10) means your ISP is NATing you a second time, so you cannot port-forward at all. Double NAT is the same thing but with your own second router."
   try_cmd "netscope --nat"
-  learn_resource "Practical Networking Module 3 (NAT deep dive) · Lawrence Systems"
+  learn_resource "Practical Networking Module 3 (NAT deep dive)  /  Lawrence Systems"
 
   lblock "3.3  VPNs" "stop forwarding ports, start tunnelling" \
-    "A VPN is an encrypted tunnel carrying packets between two networks or two hosts. Site-to-site connects two fixed networks; remote-access connects one device to a network. WireGuard is the modern default: small, fast, UDP-based, uses the Noise protocol, and is trivial to configure. OpenVPN is older but ubiquitous; IPsec is the enterprise standard for site-to-site. The key cost is MTU: the tunnel wraps your packet in an outer header (WireGuard adds ~60 bytes over IPv4, ~80 over IPv6), so the tunnel's usable MTU is usually 1420 or lower. If PMTUD is broken somewhere along the path, large packets silently die — the classic 'small sites work, big sites hang' symptom."
+    "A VPN is an encrypted tunnel carrying packets between two networks or two hosts. Site-to-site connects two fixed networks; remote-access connects one device to a network. WireGuard is the modern default: small, fast, UDP-based, uses the Noise protocol, and is trivial to configure. OpenVPN is older but ubiquitous; IPsec is the enterprise standard for site-to-site. The key cost is MTU: the tunnel wraps your packet in an outer header (WireGuard adds ~60 bytes over IPv4, ~80 over IPv6), so the tunnel's usable MTU is usually 1420 or lower. If PMTUD is broken somewhere along the path, large packets silently die - the classic 'small sites work, big sites hang' symptom."
   if [[ -n "$VPN_IF" ]]; then
     kv "Your VPN interface" "$VPN_IF"
   fi
   try_cmd "netscope --mtu 8.8.8.8"
   try_cmd "netscope --walk 8.8.8.8"
-  learn_resource "WireGuard docs (wireguard.com) · NetworkChuck WireGuard videos"
+  learn_resource "WireGuard docs (wireguard.com)  /  NetworkChuck WireGuard videos"
 
   lblock "3.4  Reverse proxy & TLS" "one port instead of many" \
     "Instead of exposing each service on its own port, run a single reverse proxy (Caddy, Nginx, Traefik) on 443 and route by the Host header / SNI. TLS sits at the proxy: the certificate binds a name to a public key and is signed by a CA the client trusts. Let's Encrypt issues free 90-day certificates via ACME; the proxy renews them automatically. SNI (the hostname the client sends in the TLS handshake) lets one proxy and one IP serve many names with many certificates. The point of putting a proxy in front is that it centralises TLS, auth (Authelia, Authentik), rate limiting, and hides your internal addresses. Ideally you only expose 443 (and 80 for the redirect) to the internet, and the VPN covers everything else."
@@ -1893,7 +1899,7 @@ learn_stage3() {
   fi
   try_cmd "netscope --tls example.com"
   try_cmd "netscope --handshake example.com"
-  learn_resource "Caddy docs · Techno Tim / Christian Lempa (reverse proxy + TLS)"
+  learn_resource "Caddy docs  /  Techno Tim or Christian Lempa (reverse proxy + TLS)"
 
   lblock "3.5  What this stage lets you do" "checkpoint" \
     "You can subnet quickly, read any address without a calculator. You can design a remote-access setup that uses WireGuard + a reverse proxy instead of a wall of port-forwards. You understand why a VPN exists and what it costs in MTU."
@@ -1902,17 +1908,17 @@ learn_stage3() {
 
 # ─── STAGE 4 ─────────────────────────────────────────────────────────────────
 learn_stage4() {
-  section "STAGE 4 — ENTERPRISE-GRADE DESIGN  (LVL 76–101)"
-  wrap "Goal: think in terms of failure, measurement and repeatability — the same three ideas that separate a homelab from a small production network." "$DIM"
+  section "STAGE 4 - ENTERPRISE-GRADE DESIGN  (LVL 76-101)"
+  wrap "Goal: think in terms of failure, measurement and repeatability - the same three ideas that separate a homelab from a small production network." "$DIM"
 
   lblock "4.1  High availability" "no single point of failure" \
-    "HA means removing every single point of failure. At layer 1, redundant links (LACP bonds) and redundant switches. At layer 2, RSTP prevents loops and LACP bundles links. At layer 3, VRRP (or keepalived, or CARP on pfSense/OPNsense) lets two routers share a virtual IP: one is master, one is backup, and the backup takes over in under a second when the master dies. CARP also syncs connection state (pfsync) so established sessions survive failover. At the compute layer, a Proxmox cluster with HA groups and live migration does the same job for VMs. At the storage layer, ZFS replication or Ceph. The point is not to eliminate complexity — it is to trade complexity for uptime, and only when the uptime is worth the complexity."
+    "HA means removing every single point of failure. At layer 1, redundant links (LACP bonds) and redundant switches. At layer 2, RSTP prevents loops and LACP bundles links. At layer 3, VRRP (or keepalived, or CARP on pfSense/OPNsense) lets two routers share a virtual IP: one is master, one is backup, and the backup takes over in under a second when the master dies. CARP also syncs connection state (pfsync) so established sessions survive failover. At the compute layer, a Proxmox cluster with HA groups and live migration does the same job for VMs. At the storage layer, ZFS replication or Ceph. The point is not to eliminate complexity - it is to trade complexity for uptime, and only when the uptime is worth the complexity."
   if have pvecm; then
     kv "Proxmox cluster" "$(pvecm status 2>/dev/null | awk '/Nodes:/ { print $0 }')"
   else
     kv "Proxmox cluster" "not detected on this host"
   fi
-  learn_resource "Lawrence Systems HA videos · Proxmox clustering docs"
+  learn_resource "Lawrence Systems HA videos  /  Proxmox clustering docs"
 
   lblock "4.2  Monitoring" "you cannot fix what you cannot see" \
     "What to watch, and why: interface errors, drops and CRCs mean a physical problem. TCP retransmits and RSTs mean a path or server problem. Latency, jitter and packet loss are the quality numbers users actually feel. Bandwidth usage is capacity planning. DNS latency and failure rate are the single most common cause of 'the internet is down'. Availability checks (ping, HTTP 200) tell you whether the thing is answering at all. The classic tools are SNMP (ask a device for counters), NetFlow / sFlow / IPFIX (who is talking to whom, how much), Prometheus + Grafana (modern metrics + alerting), and a log pipeline (journald, syslog, Loki). On the security side, a SIEM (Wazuh, Security Onion) aggregates logs and alerts. Alert on symptoms first ('site slow'), causes second ('CPU 80%')."
@@ -1921,17 +1927,17 @@ learn_stage4() {
   kv "Your latency / jitter / loss" "${LAT_MS:-?} / ${JIT_MS:-?} / ${LOSS_PCT:-?}  (ms / ms / %)"
   try_cmd "netscope --advanced"
   try_cmd "netscope --live"
-  learn_resource "Techno Tim · r/homelab · Prometheus / Grafana docs"
+  learn_resource "Techno Tim  /  r/homelab  /  Prometheus + Grafana docs"
 
   lblock "4.3  Automation" "config as code, or it is debt" \
-    "Manual configuration is a liability: it is unrepeatable, unreviewable, and drifts. Automation turns it into code you can keep in git. The key property is idempotency — running the playbook twice gives the same result. Ansible is the natural first step: agentless, SSH-based, YAML playbooks. Terraform is for declaring cloud resources. NAPALM and Netmiko are Python libraries that talk to network devices. The real win for a homelab is that you can rebuild a whole LXC or VM from scratch in one command, which is the only way to test your backups properly. Proxmox + cloud-init + Ansible is a very short path from zero to 'reproducible infrastructure'."
+    "Manual configuration is a liability: it is unrepeatable, unreviewable, and drifts. Automation turns it into code you can keep in git. The key property is idempotency - running the playbook twice gives the same result. Ansible is the natural first step: agentless, SSH-based, YAML playbooks. Terraform is for declaring cloud resources. NAPALM and Netmiko are Python libraries that talk to network devices. The real win for a homelab is that you can rebuild a whole LXC or VM from scratch in one command, which is the only way to test your backups properly. Proxmox + cloud-init + Ansible is a very short path from zero to 'reproducible infrastructure'."
   kv "Ansible"  "$(have ansible && ansible --version 2>/dev/null | head -n1 || echo 'not installed')"
   kv "Git"      "$(have git && git --version 2>/dev/null || echo 'not installed')"
   try_cmd "netscope --advanced | head -n 40"
-  learn_resource "Learn Linux TV (Docker, Ansible) · Enable Sysadmin (Red Hat)"
+  learn_resource "Learn Linux TV (Docker, Ansible)  /  Enable Sysadmin (Red Hat)"
 
   lblock "4.4  Capacity & quality" "the numbers users feel" \
-    "Oversubscription is how much bandwidth you let many users share. Bufferbloat is what happens when a queue fills up and adds latency under load — the fix is a smart queue manager (fq_codel, cake) on the router. QoS helps real-time traffic, but a faster pipe or SQM is usually the real fix. MTU and PMTUD matter because tunnels shrink MTU, and if the ICMP 'fragmentation needed' messages that report that are blocked, large packets silently die. The classic 'small sites work, big sites hang' is an MTU problem. Measure: run --speed (bufferbloat grade) and --mtu (path MTU) on your own network."
+    "Oversubscription is how much bandwidth you let many users share. Bufferbloat is what happens when a queue fills up and adds latency under load - the fix is a smart queue manager (fq_codel, cake) on the router. QoS helps real-time traffic, but a faster pipe or SQM is usually the real fix. MTU and PMTUD matter because tunnels shrink MTU, and if the ICMP 'fragmentation needed' messages that report that are blocked, large packets silently die. The classic 'small sites work, big sites hang' is an MTU problem. Measure: run --speed (bufferbloat grade) and --mtu (path MTU) on your own network."
   if (( SPEED_RAN )); then
     kv "Download / upload" "${DL_MBPS:-?} / ${UL_MBPS:-?} Mbps"
     kv "Bufferbloat"       "${BLOAT_MS:-?} ms   ${BLOAT_GRADE:-}"
@@ -1940,7 +1946,7 @@ learn_stage4() {
   fi
   try_cmd "netscope --speed"
   try_cmd "netscope --mtu 8.8.8.8"
-  learn_resource "bufferbloat.net · Lawrence Systems SQM videos"
+  learn_resource "bufferbloat.net  /  Lawrence Systems SQM videos"
 
   lblock "4.5  What this stage lets you do" "checkpoint" \
     "You can design a small network that keeps running when a piece fails, that tells you when something is wrong, and that can be rebuilt from scratch. You can measure quality (latency, jitter, loss, bufferbloat, MTU) instead of guessing. That is the difference between a homelab and a small enterprise."
@@ -1952,11 +1958,11 @@ learn_outro() {
   section "WHERE TO GO NEXT"
   wrap "The Proxmox box is the lab; the courses are the theory. The ladder that ties them together:" "$DIM"
   printf '\n'
-  kv "Lab ladder"      "segment → self-host core services → VPN instead of port-forwarding → isolated attack range → visibility (Wireshark / Wazuh / Suricata) → automate & harden"
-  kv "Cert ladder"     "A+ → Network+ → Security+ → CCNA (parallel) → CySA+ / PenTest+ → OSCP / CCNP"
-  kv "Networking spine" "Practical Networking (Ed Harmoush) — free, module-based, still growing"
-  kv "Linux spine"     "Learn Linux TV · The Linux Command Line (Shotts) · Linux From Scratch"
-  kv "Security spine"  "TryHackMe → Hack The Box → OSCP (offensive) or CySA+ / GCIH (defensive)"
+  kv "Lab ladder"      "segment -> self-host core services -> VPN instead of port-forwarding -> isolated attack range -> visibility (Wireshark / Wazuh / Suricata) -> automate & harden"
+  kv "Cert ladder"     "A+ -> Network+ -> Security+ -> CCNA (parallel) -> CySA+ / PenTest+ -> OSCP / CCNP"
+  kv "Networking spine" "Practical Networking (Ed Harmoush) - free, module-based, still growing"
+  kv "Linux spine"     "Learn Linux TV / The Linux Command Line (Shotts) / Linux From Scratch"
+  kv "Security spine"  "TryHackMe -> Hack The Box -> OSCP (offensive) or CySA+ / GCIH (defensive)"
   printf '\n'
   note "Certifications are signposts, not requirements. The skills come from the Proxmox box and the labs."
   note "See the full study plan any time with:  netscope --roadmap"
@@ -1966,7 +1972,7 @@ learn_outro() {
 render_learn() {
   local stage="${1:-}"
   section "LEARN: A DEEP CURRICULUM"
-  wrap "Four stages, taken from the 'Linux · Networking · Cybersecurity — Level 1 to 101' roadmap. Each stage builds on the last. Every block uses your real network as the example, suggests the command that shows it, and points at further reading." "$DIM"
+  wrap "Four stages, taken from the 'Linux - Networking - Cybersecurity - Level 1 to 101' roadmap. Each stage builds on the last. Every block uses your real network as the example, suggests the command that shows it, and points at further reading." "$DIM"
   wrap "Jump straight to a stage with:  netscope --learn 1   (or 2, 3, 4).  See the study plan with:  netscope --roadmap" "$DIM"
   printf '\n'
   case "$stage" in
@@ -2380,13 +2386,13 @@ walk_frame() {
   local title="$1" mack="${2:-1}" sm="${3:--}" dm="${4:--}" si="${5:--}" di="${6:--}" tt="${7:--}"
   printf '\n    %s%s%s\n' "$BOLD" "$title" "$RESET"
   if (( mack )); then
-    printf '      %sMAC%s  %s  %s→%s  %s\n' "$GRAY" "$RESET" \
+    printf '      %sMAC%s  %s  %s->%s  %s\n' "$GRAY" "$RESET" \
       "$(wf_fld "$sm" "$PW_SM")" "$RESET" "$RESET" "$(wf_fld "$dm" "$PW_DM")"
   else
-    printf '      %sMAC%s  %s(not present on this link — tunnel interface)%s\n' \
+    printf '      %sMAC%s  %s(not present on this link - tunnel interface)%s\n' \
       "$GRAY" "$RESET" "$DIM" "$RESET"
   fi
-  printf '      %sIP%s   %s  %s→%s  %s  %sTTL %s%s\n' "$GRAY" "$RESET" \
+  printf '      %sIP%s   %s  %s->%s  %s  %sTTL %s%s\n' "$GRAY" "$RESET" \
     "$(wf_fld "$si" "$PW_SI")" "$RESET" "$RESET" "$(wf_fld "$di" "$PW_DI")" \
     "$GRAY" "$(wf_fld "$tt" "$PW_TT")" "$RESET"
   PW_SM="$sm"; PW_DM="$dm"; PW_SI="$si"; PW_DI="$di"; PW_TT="$tt"
@@ -2543,7 +2549,7 @@ lab_walk() {
 
   section "PACKET WALK-THROUGH"
   if [[ "$d" != "$dest" ]]; then
-    kv "Destination" "$d  →  $dest   $(ip_kind "$dn")"
+    kv "Destination" "$d  ->  $dest   $(ip_kind "$dn")"
   else
     kv "Destination" "$dest   $(ip_kind "$dn")"
   fi
@@ -2599,13 +2605,13 @@ lab_walk() {
   fi
   printf '\n'
   if (( by_and )) && [[ -z "$nh" || "$nh" == "$dest" ]]; then
-    printf '  %sSame network → LOCAL%s: delivered directly, no router.\n' "$GREEN$BOLD" "$RESET"
+    printf '  %sSame network -> LOCAL%s: delivered directly, no router.\n' "$GREEN$BOLD" "$RESET"
   elif (( by_and )); then
     printf '  %sSame network%s, but the routing table sends it via %s.\n' "$GREEN" "$RESET" "$nh"
   elif [[ -z "$nh" ]]; then
-    printf '  %sDifferent network → REMOTE%s by the netmask test, but the routing table sends it straight out of %s (no gateway address, typical of a VPN or tunnel).\n' "$YELLOW$BOLD" "$RESET" "$dev"
+    printf '  %sDifferent network -> REMOTE%s by the netmask test, but the routing table sends it straight out of %s (no gateway address, typical of a VPN or tunnel).\n' "$YELLOW$BOLD" "$RESET" "$dev"
   else
-    printf '  %sDifferent network → REMOTE%s: the packet must go through a router.\n' "$YELLOW$BOLD" "$RESET"
+    printf '  %sDifferent network -> REMOTE%s: the packet must go through a router.\n' "$YELLOW$BOLD" "$RESET"
   fi
   (( ADVANCED )) || wnote "Add --advanced to see the binary working of the AND step, or run netscope --subnet."
 
@@ -3378,47 +3384,36 @@ lab_quiz() {
 lab_roadmap() {
   LAN_IF=""; IFACE=""; GATEWAY=""
   detect_network; wifi_gather
-  section "NETWORKING ROADMAP — LEVEL 1 TO 101"
-  wrap "The four-stage plan from the learning document, with the resources that matter and a snapshot of your own network at each stage. Use --learn N to read any stage in full." "$DIM"
+  section "NETWORKING ROADMAP - LEVEL 1 TO 101"
+  wrap "The four-stage plan from the study document, with the resources that matter. Use --learn N to read any stage in full, with your own network as the example." "$DIM"
   printf '\n'
 
-  local addr="" pfx="" pub=""
-  if learn_my_net; then addr="$LEARN_ADDR"; pfx="$LEARN_PFX"; fi
-  if have curl; then
-    pub="$(curl -4 -sS --max-time 4 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p' | head -n1)"
-  fi
+  local addr="" pfx=""
+  learn_my_net && { addr="$LEARN_ADDR"; pfx="$LEARN_PFX"; }
 
-  sub "Stage 1 — How networks actually work  (LVL 1–25)"
-  kv "Concept"  "IP addressing · OSI/TCP-IP · host, switch, router"
+  sub "Stage 1 - How networks actually work  (LVL 1-25)"
+  kv "Idea"     "IP addressing / OSI-TCP-IP / host, switch, router"
   kv "Spine"    "Practical Networking Module 1 (14 lessons, free)"
-  kv "Second angle" "NetworkChuck CCNA series · Professor Messer Network+"
-  kv "Your data" "${addr:-no IPv4}/${pfx:-?} on ${LAN_IF:-?}, gateway ${GATEWAY:-?}, ${LAN_TYPE:-?}"
-  try_cmd "netscope --learn 1"
-  try_cmd "netscope --osi"
+  kv "Second angle" "NetworkChuck CCNA series / Professor Messer Network+"
+  kv "Your box"  "netscope --learn 1   /   netscope --osi   /   netscope --walk 8.8.8.8"
 
-  sub "Stage 2 — Segmentation & core services  (LVL 26–50)"
-  kv "Concept"  "VLANs · routing · DNS · DHCP · NAT · Wi-Fi security"
+  sub "Stage 2 - Segmentation & core services  (LVL 26-50)"
+  kv "Idea"     "VLANs / routing / DNS / DHCP / NAT / Wi-Fi security"
   kv "Spine"    "Practical Networking Module 2 (18 lessons)"
-  kv "Second angle" "Jeremy's IT Lab · David Bombal CCNA labs"
-  kv "Your data" "DNS ${DNS_AVG:-?} ms avg; Wi-Fi ${WIFI_SSID:-n/a} (${WIFI_SEC:-?})"
-  try_cmd "netscope --learn 2"
-  try_cmd "netscope --routes 8.8.8.8"
+  kv "Second angle" "Jeremy's IT Lab / David Bombal CCNA labs"
+  kv "Your box"  "netscope --learn 2   /   netscope --routes 8.8.8.8   /   netscope --nat"
 
-  sub "Stage 3 — VPNs & exposed services  (LVL 51–75)"
-  kv "Concept"  "Subnetting in your head · NAT deep dive · VPNs · reverse proxy + TLS"
+  sub "Stage 3 - VPNs & exposed services  (LVL 51-75)"
+  kv "Idea"     "Subnetting in your head / NAT deep dive / VPNs / reverse proxy + TLS"
   kv "Spine"    "Practical Networking Module 3 (11 lessons); Module 4 in progress"
-  kv "Second angle" "Lawrence Systems (pfSense/OPNsense) · WireGuard docs · NetworkChuck"
-  kv "Your data" "private ${addr:-?}, public ${pub:-?}, MTU path runnable"
-  try_cmd "netscope --learn 3"
-  try_cmd "netscope --nat  &&  netscope --tls example.com"
+  kv "Second angle" "Lawrence Systems (pfSense/OPNsense) / WireGuard docs"
+  kv "Your box"  "netscope --learn 3   /   netscope --subnet   /   netscope --tls example.com"
 
-  sub "Stage 4 — Enterprise-grade design  (LVL 76–101)"
-  kv "Concept"  "High availability · monitoring · automation"
-  kv "Spine"    "Whatever PracNet releases next · CCNP-level playlists"
-  kv "Second angle" "Proxmox docs · Prometheus + Grafana · Ansible (Learn Linux TV)"
-  kv "Your data" "errors ${ERR_PCT:-0}% (+${ERR_NEW:-0}), drops ${DROP_PCT:-0}%"
-  try_cmd "netscope --learn 4"
-  try_cmd "netscope --advanced"
+  sub "Stage 4 - Enterprise-grade design  (LVL 76-101)"
+  kv "Idea"     "High availability / monitoring / automation"
+  kv "Spine"    "Whatever PracNet releases next / CCNP-level playlists"
+  kv "Second angle" "Proxmox docs / Prometheus + Grafana / Ansible"
+  kv "Your box"  "netscope --learn 4   /   netscope --advanced"
 
   printf '\n'
   sub "Lab ladder (Proxmox)"
@@ -3430,10 +3425,19 @@ lab_roadmap() {
   kv "6" "Automate & harden (Ansible, fail2ban/CrowdSec, 3-2-1 backups, Proxmox HA)"
   printf '\n'
   sub "Cert ladder (optional signposts)"
-  printf '  A+ %s→%s Network+ %s→%s Security+ %s→%s CCNA (parallel) %s→%s CySA+ / PenTest+ %s→%s OSCP / CCNP\n' \
-    "$GRAY" "$RESET" "$GRAY" "$RESET" "$GRAY" "$RESET" "$GRAY" "$RESET" "$GRAY" "$RESET"
+  printf '  A+ %s Network+ %s Security+ %s CCNA (parallel) %s CySA+ / PenTest+ %s OSCP / CCNP\n' \
+    "$G_ARROW" "$G_ARROW" "$G_ARROW" "$G_ARROW" "$G_ARROW"
+  printf '\n'
+  if [[ -n "$addr" ]]; then
+    kv "Your current address" "$addr/$pfx"
+    [[ -n "$GATEWAY" ]] && kv "Your current gateway" "$GATEWAY"
+  fi
+  if [[ -n "$WIFI_SSID" ]]; then
+    kv "Your Wi-Fi" "$WIFI_SSID (${WIFI_BAND:-?}, ch ${WIFI_CHAN:-?})"
+  fi
   printf '\n'
   note "The Proxmox box and the labs are where the skill gets built. Levels are a rough sense of progression, not a strict checklist."
+  note "Run netscope --learn 1 .. --learn 4 for the full curriculum."
   printf '\n'
 }
 
@@ -3553,9 +3557,9 @@ lab_compare() {
     local first="${SCORES[0]}" last="${SCORES[${#SCORES[@]}-1]}"
     local diff=$(( last - first ))
     printf '\n'
-    if (( diff > 0 )); then printf '  %s↑ improved by %d points since run 1%s\n' "$GREEN" "$diff" "$RESET"
-    elif (( diff < 0 )); then printf '  %s↓ dropped by %d points since run 1%s\n' "$RED" "$((-diff))" "$RESET"
-    else printf '  %s→ unchanged%s\n' "$GRAY" "$RESET"; fi
+    if (( diff > 0 )); then printf '  %s^ improved by %d points since run 1%s\n' "$GREEN" "$diff" "$RESET"
+    elif (( diff < 0 )); then printf '  %sv dropped by %d points since run 1%s\n' "$RED" "$((-diff))" "$RESET"
+    else printf '  %s- unchanged%s\n' "$GRAY" "$RESET"; fi
   fi
   printf '\n'
 }
@@ -3566,7 +3570,7 @@ render_report_to() {
   [[ -d "$dir" ]] || { printf 'Directory does not exist: %s\n' "$dir" >&2; return 1; }
   local i words=("Not working" "Struggling" "Poor" "OK" "Good" "Great")
   {
-    printf '# NetScope report — %s\n\n' "$(date -Is 2>/dev/null)"
+    printf '# NetScope report - %s\n\n' "$(date -Is 2>/dev/null)"
     printf 'Generated by NetScope %s on %s.\n\n' "$VERSION" "$(date '+%Y-%m-%d %H:%M %Z')"
     printf 'This report is sanitised: MAC addresses, BSSIDs and the public IP are not included.\n\n'
     printf '## Summary\n\n'
@@ -3635,6 +3639,7 @@ run_lab() {
     channels)  lab_channels || rc=$? ;;
     topology)  lab_topology || rc=$? ;;
     quiz)      lab_quiz || rc=$? ;;
+    roadmap)   lab_roadmap || rc=$? ;;
     course)    lab_course || rc=$? ;;
     quick)     lab_quick ;;   # always exits itself
     history)   lab_history || rc=$? ;;
@@ -3691,7 +3696,7 @@ main() {
   printf '  %s%s%s Scan complete in %s seconds.\n' "$GREEN" "$G_OK" "$RESET" "$(awk -v a="$t_start" -v b="$t_end" 'BEGIN { printf "%.1f", (b - a) / 1000 }')"
 
   render_basic
-  (( LEARN )) && render_learn
+  (( LEARN )) && render_learn "${LEARN_STAGE:-}"
   (( OSI )) && render_osi
 
   do_adv="$ADVANCED"
@@ -3710,7 +3715,7 @@ main() {
   local hint="NetScope $VERSION"
   (( ! do_adv && ! PROMPT )) && hint+="  $G_MID  use --advanced for the technical view"
   (( SPEED )) || hint+="  $G_MID  --speed measures download/upload"
-  (( LEARN )) || hint+="  $G_MID  --learn explains each step"
+  (( LEARN )) || hint+="  $G_MID  --learn [1-4] for the curriculum  $G_MID  --roadmap for the plan"
   hint+="  $G_MID  --walk DEST follows a packet  $G_MID  --live for a live monitor"
   printf '\n'; wrap "$hint" "$DIM"; printf '\n'
   finish
