@@ -1,4 +1,4 @@
-# NetScope 2.5: Network Health Console
+# NetScope 2.6: Network Health Console
 
 NetScope is a Bash script that checks every link between your computer and the internet and reports the result in plain language. It first shows a friendly summary. If you press **A**, it then shows a technical report with the raw numbers.
 
