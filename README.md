@@ -2,6 +2,8 @@
 
 NetScope is a Bash script that checks every link between your computer and the internet and reports the result in plain language. It first shows a friendly summary. If you press **A**, it then shows a technical report with the raw numbers.
 
+
+
 > NetScope is a **local, read-only check-up**. It never scans other devices, tests open ports, or changes any configuration. The score is not an official speed rating. A few modes send probe packets (ping, tracepath) to a host *you* name; see [Network contacts](#network-contacts).
 
 ---
