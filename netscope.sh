@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
-#  NetScope 2.6 — a friendly network health console for Linux Mint
+#  NetScope 2.7 — a friendly network health console for Linux Mint
 #  (also works on other Ubuntu / Debian based desktops)
 #
 #  • Simple view   : plain-English verdict, a "journey of your data" map,
@@ -12,6 +12,18 @@
 #  • Read-only     : changes no settings, installs nothing, needs no sudo.
 #
 #  Run  netscope --help  to see all options.
+#
+#  What's new in 2.7
+#   - Fixes: --subnet for /31 and /32 (no bogus "broadcast", correct host
+#     maths), more address ranges recognised (0.0.0.0/8, reserved, benchmark),
+#     6 GHz channel numbers at the bottom of the band, DNS average reported
+#     as null (not 0) when every lookup failed, --quick no longer says OK
+#     when pings are being lost, --report now exits 1 when the file cannot
+#     be written.
+#   - Stricter option handling: --learn STAGE must be 1-4 (exit 2), and two
+#     different lab modes in one command are refused instead of the last one
+#     silently winning.
+#   - The history folder is created private (mode 700).
 #
 #  What's new in 2.6
 #   - --learn rewritten into a four-stage curriculum modelled on the
@@ -27,7 +39,7 @@
 #     and cert ladder.
 #   - --course extended with the new learning modes.
 #
-#  What's new in 2.6
+#  What's new in 2.5
 #   - --walk rewritten: hop table with latency and status, calculated values
 #     marked, graceful handling of missing tools and incomplete traces.
 #   - --routes explains every route and lists every match for a destination.
@@ -36,7 +48,7 @@
 # ──────────────────────────────────────────────────────────────────────────────
 
 set -u
-VERSION="2.6"
+VERSION="2.7"
 
 if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
   echo "NetScope needs bash 4.4 or newer." >&2
@@ -120,6 +132,12 @@ take_arg() {
 need_arg() {
   if ! take_arg "${3:-}"; then printf '%s needs %s\n' "$1" "$2" >&2; exit 2; fi
 }
+set_mode() {
+  if [[ -n "$MODE" && "$MODE" != "$1" ]]; then
+    printf 'Only one lab mode at a time (you asked for --%s and --%s).\n' "$MODE" "$1" >&2; exit 2
+  fi
+  MODE="$1"
+}
 while (( $# )); do
   arg="$1"; shift
   case "$arg" in
@@ -130,28 +148,31 @@ while (( $# )); do
     -n|--no-prompt)         PROMPT=0 ;;
     --no-color|--no-colour) OPT_NOCOLOR=1 ;;
     --ascii)                OPT_ASCII=1 ;;
-    --learn)                LEARN=1; take_arg "${1:-}" && shift; LEARN_STAGE="$OPT_VAL" ;;
-    --roadmap)              MODE=roadmap ;;
+    --learn)                LEARN=1; take_arg "${1:-}" && shift; LEARN_STAGE="$OPT_VAL"
+                            if [[ -n "$LEARN_STAGE" && ! "$LEARN_STAGE" =~ ^[1-4]$ ]]; then
+                              printf -- '--learn STAGE must be 1, 2, 3 or 4 (you gave: %s)\n' "$LEARN_STAGE" >&2; exit 2
+                            fi ;;
+    --roadmap)              set_mode roadmap ;;
     --osi)                  OSI=1 ;;
-    --walk)                 MODE=walk;      need_arg --walk "a destination, for example: --walk 8.8.8.8" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
-    --subnet)               MODE=subnet;    take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
-    --mtu)                  MODE=mtu;       take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
-    --glossary)             MODE=glossary;  take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
-    --dns)                  MODE=dns;       need_arg --dns "a domain, for example: --dns example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
-    --tls)                  MODE=tls;       need_arg --tls "a host, for example: --tls example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
-    --arp)                  MODE=arp ;;
-    --routes)               MODE=routes;    take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
-    --ports)                MODE=ports ;;
-    --handshake)            MODE=handshake; need_arg --handshake "a host, e.g. --handshake example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
-    --nat)                  MODE=nat ;;
-    --dhcp)                 MODE=dhcp ;;
-    --channels)             MODE=channels ;;
-    --topology)             MODE=topology;  take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
-    --quiz)                 MODE=quiz ;;
-    --course)               MODE=course ;;
-    --quick)                MODE=quick ;;
-    --history)              MODE=history ;;
-    --compare)              MODE=compare;   take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --walk)                 set_mode walk;      need_arg --walk "a destination, for example: --walk 8.8.8.8" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
+    --subnet)               set_mode subnet;    take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --mtu)                  set_mode mtu;       take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --glossary)             set_mode glossary;  take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --dns)                  set_mode dns;       need_arg --dns "a domain, for example: --dns example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
+    --tls)                  set_mode tls;       need_arg --tls "a host, for example: --tls example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
+    --arp)                  set_mode arp ;;
+    --routes)               set_mode routes;    take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --ports)                set_mode ports ;;
+    --handshake)            set_mode handshake; need_arg --handshake "a host, e.g. --handshake example.com" "${1:-}"; shift; MODE_ARG="$OPT_VAL" ;;
+    --nat)                  set_mode nat ;;
+    --dhcp)                 set_mode dhcp ;;
+    --channels)             set_mode channels ;;
+    --topology)             set_mode topology;  take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
+    --quiz)                 set_mode quiz ;;
+    --course)               set_mode course ;;
+    --quick)                set_mode quick ;;
+    --history)              set_mode history ;;
+    --compare)              set_mode compare;   take_arg "${1:-}" && shift; MODE_ARG="$OPT_VAL" ;;
     --report)               need_arg --report "a file name, e.g. --report ~/report.md" "${1:-}"; shift; REPORT_FILE="$OPT_VAL"; PROMPT=0 ;;
     -V|--version)           echo "NetScope $VERSION"; exit 0 ;;
     -h|--help)              usage; exit 0 ;;
@@ -305,7 +326,8 @@ HISTORY_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/netscope"
 HISTORY_FILE="$HISTORY_DIR/history.jsonl"
 
 save_history() {
-  mkdir -p "$HISTORY_DIR" 2>/dev/null || return 1
+  mkdir -p -m 700 "$HISTORY_DIR" 2>/dev/null || return 1
+  chmod 700 "$HISTORY_DIR" 2>/dev/null
   printf '{"ts":%s,"score":%d,"grade":%s,"lat_ms":%s,"loss":%s,"iface":%s,"internet":%s}\n' \
     "$(json_str "$(date -Is 2>/dev/null)")" "$SCORE" "$(json_str "$GRADE")" \
     "$(json_str "${LAT_MS:-}")" "$(json_str "${LOSS_PCT:-}")" "$(json_str "${LAN_IF:-}")" "$(json_str "${INTERNET:-unknown}")" >> "$HISTORY_FILE" 2>/dev/null
@@ -429,13 +451,13 @@ freq_to_chan() {
   [[ "$f" =~ ^[0-9]+$ ]] || return 0
   if   (( f == 2484 )); then echo 14
   elif (( f < 2484 ));  then echo $(( (f - 2407) / 5 ))
-  elif (( f >= 5955 )); then echo $(( (f - 5950) / 5 ))
+  elif (( f >= 5925 )); then echo $(( (f - 5950) / 5 ))
   else echo $(( (f - 5000) / 5 )); fi
 }
 freq_to_band() {
   local f="$1"
   [[ "$f" =~ ^[0-9]+$ ]] || return 0
-  if (( f < 3000 )); then echo "2.4 GHz"; elif (( f < 5900 )); then echo "5 GHz"; else echo "6 GHz"; fi
+  if (( f < 3000 )); then echo "2.4 GHz"; elif (( f < 5925 )); then echo "5 GHz"; else echo "6 GHz"; fi
 }
 
 read_counters() {
@@ -1262,7 +1284,7 @@ render_json() {
   printf '},\n'
   printf '  "latency": {"avg_ms": %s, "jitter_ms": %s, "loss_pct": %s, "source": %s},\n' \
     "$(json_num "$LAT_MS")" "$(json_num "$JIT_MS")" "$(json_num "$LOSS_PCT")" "$(json_or_null "$LAT_SRC")"
-  printf '  "dns": {"ok": %d, "total": %d, "avg_ms": %d},\n' "$DNS_OKN" "$DNS_TOTAL" "$DNS_AVG"
+  printf '  "dns": {"ok": %d, "total": %d, "avg_ms": %s},\n' "$DNS_OKN" "$DNS_TOTAL" "$( (( DNS_OKN > 0 )) && printf '%d' "$DNS_AVG" || printf null)"
   printf '  "https": {"ok": %s, "status": %s, "total_ms": %s},\n' \
     "$(json_bool "$([[ "$INTERNET" == OK ]] && echo 1 || echo 0)")" "$(json_num "$H_CODE")" "$(json_num "$H_TOTAL")"
   printf '  "ipv6": %s,\n' "$(json_bool "$IPV6_OK")"
@@ -2073,7 +2095,9 @@ ip2int() {
 }
 ip_kind() {
   local a=$(( $1 >> 24 )) b=$(( ($1 >> 16) & 255 ))
-  if   (( a == 10 )); then echo "private (RFC 1918, 10.0.0.0/8)"
+  if   (( $1 == 0xFFFFFFFF )); then echo "limited broadcast (255.255.255.255)"
+  elif (( a == 0 )); then echo "\"this network\" (0.0.0.0/8, not a normal host address)"
+  elif (( a == 10 )); then echo "private (RFC 1918, 10.0.0.0/8)"
   elif (( a == 172 && b >= 16 && b <= 31 )); then echo "private (RFC 1918, 172.16.0.0/12)"
   elif (( a == 192 && b == 168 )); then echo "private (RFC 1918, 192.168.0.0/16)"
   elif (( a == 100 && b >= 64 && b <= 127 )); then echo "shared address space (carrier-grade NAT, 100.64.0.0/10)"
@@ -2082,7 +2106,9 @@ ip_kind() {
   elif (( a == 192 && b == 0 && (($1 >> 8) & 255) == 2 )); then echo "documentation only (TEST-NET-1, 192.0.2.0/24, never routed)"
   elif (( a == 198 && b == 51 && (($1 >> 8) & 255) == 100 )); then echo "documentation only (TEST-NET-2, 198.51.100.0/24, never routed)"
   elif (( a == 203 && b == 0 && (($1 >> 8) & 255) == 113 )); then echo "documentation only (TEST-NET-3, 203.0.113.0/24, never routed)"
+  elif (( a == 198 && (b == 18 || b == 19) )); then echo "benchmark testing (198.18.0.0/15, not for normal use)"
   elif (( a >= 224 && a <= 239 )); then echo "multicast"
+  elif (( a >= 240 )); then echo "reserved (240.0.0.0/4)"
   else echo "public (routable on the internet)"; fi
 }
 
@@ -2117,7 +2143,8 @@ lab_subnet() {
   kv "Address" "$(int2ip "$ip")"
   kv "Prefix / netmask" "/$pfx  =  $(int2ip "$mask")"
   kv "Network address" "$(int2ip "$net")   (first address, names the whole network)"
-  kv "Broadcast address" "$(int2ip "$bc")   (last address, reaches every host)"
+  if (( pfx >= 31 )); then kv "Broadcast address" "none   (a /$pfx has no broadcast address)"
+  else kv "Broadcast address" "$(int2ip "$bc")   (last address, reaches every host)"; fi
   kv "Usable host range" "$(int2ip "$first")  to  $(int2ip "$last")"
   kv "Number of hosts" "$hosts"
   kv "Address type" "$(ip_kind "$ip")"
@@ -2127,7 +2154,9 @@ lab_subnet() {
   printf '  %s%-10s%s %s\n' "$GRAY" "netmask" "$RESET" "$(bin_ip "$mask")"
   printf '  %s%-10s%s %s%s%s\n' "$GRAY" "network" "$RESET" "$BOLD" "$(bin_ip "$net")" "$RESET"
   wrap "The prefix /$pfx means the first $pfx bits identify the network and the remaining $(( 32 - pfx )) bits identify the host. Where the mask has a 1 the bit is kept, where it has a 0 the bit is cleared. The result is the network address." "$DIM"
-  wrap "Hosts = 2^$(( 32 - pfx )) minus 2, because the network address and the broadcast address cannot be given to a computer (the exceptions are /31 point-to-point links and /32 single hosts)." "$DIM"
+  if   (( pfx == 32 )); then wrap "A /32 is one single address: there is no network or broadcast address to subtract, so it holds exactly 1 host. Routers use /32 for loopbacks and host routes." "$DIM"
+  elif (( pfx == 31 )); then wrap "A /31 holds 2 addresses and both are usable (RFC 3021): on a point-to-point link there is no need for a network or broadcast address, so nothing is subtracted." "$DIM"
+  else wrap "Hosts = 2^$(( 32 - pfx )) minus 2, because the network address and the broadcast address cannot be given to a computer (the exceptions are /31 point-to-point links and /32 single hosts)." "$DIM"; fi
 
   sub "Is it on your local network or does it go to the gateway?"
   [[ -n "$GATEWAY" ]] && gwi="$GATEWAY"
@@ -2140,8 +2169,13 @@ lab_subnet() {
 
   sub "Cheat sheet"
   printf '  %s%-8s %-16s %s%s\n' "$GRAY" "PREFIX" "NETMASK" "USABLE HOSTS" "$RESET"
-  for t in 8 16 20 24 25 26 27 28 29 30; do
-    printf '  /%-7s %-16s %s\n' "$t" "$(int2ip $(( (0xFFFFFFFF << (32 - t)) & 0xFFFFFFFF )))" "$(( (1 << (32 - t)) - 2 ))"
+  for t in 8 16 20 24 25 26 27 28 29 30 31 32; do
+    case "$t" in
+      31) tn="2  (point-to-point, RFC 3021)" ;;
+      32) tn="1  (single host)" ;;
+      *)  tn="$(( (1 << (32 - t)) - 2 ))" ;;
+    esac
+    printf '  /%-7s %-16s %s\n' "$t" "$(int2ip $(( (0xFFFFFFFF << (32 - t)) & 0xFFFFFFFF )))" "$tn"
   done
   printf '\n'
   note "Try other networks:  netscope --subnet 10.0.0.1/8   netscope --subnet 172.16.5.9/20"
@@ -3498,7 +3532,10 @@ lab_quick() {
     loss="$(sed -n 's/.* \([0-9]*\)% packet loss.*/\1/p' <<<"$pub_out" | head -n1)"
     [[ -n "$loss" && "$loss" != "100" ]] && pub_ok=1
   fi
-  if (( pub_ok )); then
+  if (( pub_ok )) && [[ "${loss:-0}" =~ ^[0-9]+$ ]] && (( loss > 0 )); then
+    printf '%sDEGRADED%s  internet reachable but %s%% of pings were lost (%s)\n' "$YELLOW" "$RESET" "$loss" "$(fmt_ms "${lat:-?}")"
+    exit 10
+  elif (( pub_ok )); then
     printf '%sOK%s  %s  loss=%s%%  iface=%s\n' "$GREEN" "$RESET" "$(fmt_ms "${lat:-?}")" "${loss:-?}" "${LAN_IF:-?}"
     exit 0
   elif (( gw_ok )); then
@@ -3584,7 +3621,7 @@ render_report_to() {
     printf '| Jitter | %s ms |\n' "${JIT_MS:--}"
     printf '| Packet loss | %s%% |\n' "${LOSS_PCT:--}"
     printf '| DNS lookups | %d / %d ok |\n' "$DNS_OKN" "$DNS_TOTAL"
-    printf '| DNS average | %d ms |\n' "$DNS_AVG"
+    if (( DNS_OKN > 0 )); then printf '| DNS average | %d ms |\n' "$DNS_AVG"; else printf '| DNS average | - |\n'; fi
     printf '| IPv6 | %s |\n' "$( (( IPV6_OK )) && echo reachable || echo 'not reachable')"
     printf '| Captive portal | %s |\n' "$( (( PORTAL )) && echo 'likely' || echo 'no')"
     printf '\n## Journey\n\n'
@@ -3666,6 +3703,9 @@ main() {
     printf '  Install it with:  sudo apt install iproute2   and run NetScope again.\n\n' >&2
     exit 1
   fi
+  if [[ -n "$REPORT_FILE" && ! -d "$(dirname "$REPORT_FILE")" ]]; then
+    printf 'Directory does not exist: %s\n' "$(dirname "$REPORT_FILE")" >&2; exit 1
+  fi
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/netscope.XXXXXX")" || { echo "Cannot create a temporary folder." >&2; exit 1; }
   t_start="$(now_ms)"
 
@@ -3689,7 +3729,7 @@ main() {
   fi
 
   if [[ -n "$REPORT_FILE" ]]; then
-    render_report_to "$REPORT_FILE"
+    render_report_to "$REPORT_FILE" || exit 1
     finish
   fi
 
