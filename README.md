@@ -1,4 +1,4 @@
-# NetScope 2.6: Network Health Console
+# NetScope 2.7: Network Health Console
 
 NetScope is a Bash script that checks every link between your computer and the internet and reports the result in plain language. It first shows a friendly summary. If you press **A**, it then shows a technical report with the raw numbers.
 
@@ -11,6 +11,7 @@ NetScope is a Bash script that checks every link between your computer and the i
 1. [Quick start](#quick-start)
 2. [How a run works](#how-a-run-works)
    - [Learning tools (introduced in 2.2)](#learning-tools-introduced-in-22)
+   - [Study curriculum (`--learn`, `--roadmap`)](#study-curriculum---learn---roadmap)
    - [Packet walk-through (`--walk`)](#packet-walk-through---walk)
    - [Routing table and longest-prefix match (`--routes`)](#routing-table-and-longest-prefix-match---routes)
    - [Explore your own network (new in 2.4)](#explore-your-own-network-new-in-24)
@@ -53,20 +54,23 @@ mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/Resmo94/Net
 | `--advanced`, `-a` | Shows the summary and then the full technical report without asking. |
 | `--speed`, `-s` | Measures download and upload speed. Without it, streaming shows "speed not measured". |
 | `--live`, `-l` | Opens a live monitor instead of a one-off report (press `q` to quit). |
-| `--json`, `-j` | Prints the results as JSON. No colours, no questions, no banner. |
+| `--json`, `-j` | Prints the results as JSON. No colours, no questions, no banner. `dns.avg_ms` is `null` when no lookup succeeded. |
 | `--no-prompt`, `-n` | Never asks questions (useful in scripts). |
 | `--no-color` | Turns colours off. |
 | `--ascii` | Uses plain ASCII instead of special symbols. |
 | `--version`, `--help` | Show the version or the help text. |
+
+> **One lab mode at a time.** Modes such as `--walk`, `--subnet`, `--dns`, `--tls`, `--mtu`, `--glossary`, `--roadmap`, `--arp`, `--routes`, `--ports`, `--handshake`, `--nat`, `--dhcp`, `--channels`, `--topology`, `--quiz`, `--course`, `--quick`, `--history` and `--compare` cannot be combined with each other. Before 2.7 the last one silently won; now NetScope stops with exit status `2`. Repeating the same mode is fine, and modifiers such as `--advanced`, `--speed`, `--learn`, `--osi`, `--report`, `--no-color` and `--ascii` do not count as modes.
 
 **Learning tools** (read-only)
 
 | Option | What it does |
 |---|---|
 | `--walk DEST` | Follows one IPv4 packet to a hostname or IP, hop by hop, with latency and status per hop. Sends one ping (only if needed) and a short tracepath toward DEST. |
-| `--learn` | Adds a plain-language explanation of every step, using your own numbers. |
+| `--learn [STAGE]` | Adds a four-stage networking curriculum to the report, using your own numbers. `STAGE` is 1 to 4; leave it out for all four. Anything else is refused (exit `2`). |
+| `--roadmap` | The four-stage study plan with resources, a lab ladder and a certification ladder. |
 | `--osi` | Shows your results on the seven OSI layers. |
-| `--subnet [CIDR]` | Subnet calculator. Uses your own address if you give none. |
+| `--subnet [CIDR]` | Subnet calculator. Uses your own address if you give none. Handles `/31` (point-to-point) and `/32` (single host) correctly. |
 | `--dns DOMAIN` | DNS explorer. |
 | `--tls HOST[:PORT]` | TLS and certificate inspector. |
 | `--mtu [HOST]` | Path MTU discovery. |
@@ -82,7 +86,7 @@ mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/Resmo94/Net
 | `--handshake HOST[:PORT]` | DNS, TCP and TLS handshake timed separately. |
 | `--nat` | Private versus public address, and what that implies. |
 | `--dhcp` | Your DHCP lease and the four-step exchange. |
-| `--channels` | Wi-Fi channel congestion, from a cached scan. |
+| `--channels` | Wi-Fi channel congestion, from a cached scan (2.4, 5 and 6 GHz). |
 | `--topology [DEST]` | A labelled ASCII diagram of your path (default `8.8.8.8`). |
 | `--quiz` | Short quiz with answers from your own network. |
 | `--course` | Map of each networking topic to the command that demonstrates it. |
@@ -91,10 +95,10 @@ mkdir -p ~/.local/bin && curl -sSL https://raw.githubusercontent.com/Resmo94/Net
 
 | Option | What it does |
 |---|---|
-| `--quick` | Two-second one-line status with an exit code. |
+| `--quick` | Two-second one-line status with an exit code. Reports `DEGRADED` when pings are being lost. |
 | `--history` | Shows the last 20 saved runs. |
 | `--compare [N]` | Compares the last N saved runs (default 5). |
-| `--report FILE` | Saves a sanitised Markdown report to FILE. |
+| `--report FILE` | Saves a sanitised Markdown report to FILE. The folder must exist; otherwise NetScope stops before scanning and exits `1`. |
 
 ### Exit status
 
@@ -105,10 +109,36 @@ NetScope's exit code reflects the health score, so other scripts can react to it
 | `0` | Healthy (score 75 or more). |
 | `10` | Needs attention (score 55 to 74). |
 | `20` | Poor (score below 55). |
-| `1` | NetScope could not run (for example `ip` is missing), or a mode could not complete (for example no route to the `--walk` destination). |
-| `2` | Bad command-line option or invalid argument. |
+| `1` | NetScope could not run (for example `ip` is missing), or a mode could not complete (for example no route to the `--walk` destination, or `--report` cannot write its file). |
+| `2` | Bad command-line option or invalid argument (for example `--learn 5`, an invalid `--subnet` value, or two different lab modes in one command). |
 
-`--quick` uses the same codes: `0` = OK, `10` = DEGRADED (router answers, internet does not), `20` = FAIL.
+`--quick` uses the same codes: `0` = OK, `10` = DEGRADED (the router answers but the internet does not, or the internet answers but some pings are lost), `20` = FAIL.
+
+`--learn` and `--osi` run the normal scan first, so they exit with the health score like a normal run (for example `20` on a network with no internet).
+
+### What's new in 2.7
+
+**Fixes**
+
+- **`--subnet` for `/31` and `/32`.** A `/31` no longer shows a made-up broadcast address and is explained as an RFC 3021 point-to-point link with 2 usable hosts. A `/32` is explained as a single address. The explanation no longer claims "2^0 minus 2". The cheat sheet now includes `/31` and `/32`.
+- **More address ranges recognised.** `0.0.0.0/8` ("this network") is no longer called public. Reserved (`240.0.0.0/4`), benchmark-testing (`198.18.0.0/15`) and the limited broadcast address `255.255.255.255` are labelled.
+- **6 GHz Wi-Fi.** Channels at the bottom of the band (5925 to 5954 MHz) were computed as 5 GHz channels; they now use the 6 GHz formula, in `--channels` and in the report.
+- **`--json` and `--report`.** The DNS average is `null` (JSON) or `-` (report) when every lookup failed, instead of `0`.
+- **`--quick`** no longer prints `OK` when pings are being lost; it prints `DEGRADED` and exits `10`.
+- **`--report`** checks that the folder exists before scanning, and exits `1` when the file cannot be written (before, the exit code only reflected the health score).
+
+**Stricter option handling**
+
+- `--learn STAGE` must be 1, 2, 3 or 4 (exit `2`). Before, a wrong value silently showed all stages.
+- Two different lab modes in one command are refused (exit `2`) instead of the last one winning.
+- The history folder is created private (mode `700`), and an existing one is tightened to `700`.
+
+### What's new in 2.6
+
+- **`--learn` rewritten** into a four-stage curriculum: *How networks actually work* (levels 1 to 25), *Segmentation and core services* (26 to 50), *VPNs and exposed services* (51 to 75) and *Enterprise-grade design* (76 to 101). Every block uses your own network as the example, names the command that demonstrates it and points to further reading. See [Study curriculum](#study-curriculum---learn---roadmap).
+- **`--learn STAGE`** (1 to 4) shows a single stage.
+- **`--roadmap`** shows the study plan, a Proxmox lab ladder and a certification ladder.
+- **`--course`** lists the new modes.
 
 ### What's new in 2.5
 
@@ -190,13 +220,14 @@ Scan (~5 s)  →  Summary screen  →  [A] Advanced diagnostics  →  Done
 
 ## Learning tools (introduced in 2.2)
 
-These modes explain networking concepts using your own network. They run, print, and exit without the normal scan (except `--learn` and `--osi`, which are added to the normal report). None of them changes the score, the exit code or the `--json` output of a normal run.
+These modes explain networking concepts using your own network. They run, print, and exit without the normal scan (except `--learn` and `--osi`, which are added to the normal report). `--roadmap` also needs no scan. None of them changes the score, the exit code or the `--json` output of a normal run.
 
 | Command | Concept it teaches | What you see |
 |---|---|---|
-| `./netscope.sh --learn` | The path of a packet, layer by layer | After the summary, one explanation per step filled in with your IP, signal, gateway, latency and DNS time, plus the raw Linux command behind each ("Try it"). |
+| `./netscope.sh --learn [STAGE]` | A four-stage networking curriculum | After the summary, explanations filled in with your own IP, subnet, gateway, latency and DNS results, plus the command that demonstrates each ("Try it") and a reading or watching suggestion. See [Study curriculum](#study-curriculum---learn---roadmap). |
+| `./netscope.sh --roadmap` | The study plan | The four stages with their main resources, a lab ladder and a certification ladder. |
 | `./netscope.sh --osi` | The OSI model | Seven rows from Application (7) down to Physical (1), each marked OK, WARN or FAIL. It names the lowest layer with a problem. |
-| `./netscope.sh --subnet [CIDR]` | Subnetting, netmasks, local vs remote | Network and broadcast address, usable host range, number of hosts and address type, the **binary AND** of address and mask, a local/remote test for your gateway and 1.1.1.1, and a prefix cheat sheet. |
+| `./netscope.sh --subnet [CIDR]` | Subnetting, netmasks, local vs remote | Network and broadcast address (none for `/31` and `/32`), usable host range, number of hosts and address type, the **binary AND** of address and mask, a local/remote test for your gateway and 1.1.1.1, and a prefix cheat sheet from `/8` to `/32`. |
 | `./netscope.sh --dns example.com` | How DNS works | The same query asked twice (cache effect), A/AAAA/CNAME/MX/NS/TXT/SOA records with TTLs, a reverse lookup, and a `dig +trace` walk. Needs `dig`. |
 | `./netscope.sh --tls example.com` | TLS and certificates | Protocol, cipher, certificate subject, issuer, expiry, names, chain length and trust. Needs `openssl`. |
 | `./netscope.sh --mtu [HOST]` | MTU and fragmentation | A binary search with Do-Not-Fragment pings, ending in the path MTU. Needs `ping`; the host must answer ping. |
@@ -212,9 +243,32 @@ These modes explain networking concepts using your own network. They run, print,
 ./netscope.sh --glossary nat
 ```
 
-> **Reading `--subnet`:** the number after the slash is how many leading bits are the network part. Address AND mask gives the network address. Two computers can talk directly when their results match; otherwise traffic goes through the gateway.
+> **Reading `--subnet`:** the number after the slash is how many leading bits are the network part. Address AND mask gives the network address. Two computers can talk directly when their results match; otherwise traffic goes through the gateway. Usable hosts are the total minus 2 (network and broadcast address), except `/31` (both addresses usable, RFC 3021) and `/32` (one host). The address type recognises private (RFC 1918), carrier-grade NAT (`100.64.0.0/10`), link-local, loopback, documentation-only, benchmark, multicast, reserved and "this network" ranges.
 
 > **Reading `--osi`:** a FAIL at layer 3 while layers 1 and 2 are OK means the cable or Wi-Fi works and the router is reachable, but IP traffic does not get through to the internet.
+
+---
+
+## Study curriculum (`--learn`, `--roadmap`)
+
+Introduced in 2.6. It follows the four-stage plan from the *Linux, Networking, Cybersecurity: Level 1 to 101* study document.
+
+| Stage | Levels | Topic |
+|---|---|---|
+| **1** | 1 to 25 | How networks actually work: IP addressing, OSI and TCP/IP, hosts, switches and routers. |
+| **2** | 26 to 50 | Segmentation and core services: VLANs, routing, DNS, DHCP, NAT, Wi-Fi security. |
+| **3** | 51 to 75 | VPNs and exposed services: subnetting in your head, NAT in depth, VPNs, reverse proxy and TLS. |
+| **4** | 76 to 101 | Enterprise-grade design: high availability, monitoring, automation. |
+
+```bash
+./netscope.sh --learn            # the report, then all four stages
+./netscope.sh --learn 3          # the report, then Stage 3 only
+./netscope.sh --roadmap          # the study plan only, no scan
+```
+
+- Each block explains an idea, shows **your own numbers** where they apply (address, subnet, gateway, latency, DNS), names the NetScope command that demonstrates it (`> Try it: netscope --nat`) and gives a resource (`> Read / watch: ...`).
+- `--learn` runs the normal scan first and appends the curriculum, so it takes the usual 5 seconds and exits with the health score. `--roadmap` sends nothing and exits `0`.
+- `--course` is the quickest map from topic to command.
 
 ---
 
@@ -308,7 +362,7 @@ Each line of `ip -4 route` is printed with an explanation. With a destination, N
 | `--handshake HOST[:PORT]` | A cumulative timeline of DNS, TCP connect, TLS handshake and first byte, then the duration of each stage. If the connection fails, the curl exit status is reported. Needs `curl`. |
 | `--nat` | Your local address next to the public address seen from the internet (via a Cloudflare trace request). It tells you whether a translation happens, but **not** how many NAT layers there are: compare with your router's WAN address for that. |
 | `--dhcp` | Your address, gateway and DNS servers, the lease file if one is readable, and the four DHCP steps (Discover, Offer, Request, Acknowledge). |
-| `--channels` | Wi-Fi networks per channel, from NetworkManager's **cached** scan (no new scan is triggered). Needs `nmcli` and a Wi-Fi adapter. |
+| `--channels` | Wi-Fi networks per channel (2.4, 5 and 6 GHz), from NetworkManager's **cached** scan (no new scan is triggered). Needs `nmcli` and a Wi-Fi adapter. |
 | `--topology [DEST]` | A labelled diagram: you, your gateway, the routers found with `tracepath`, and the destination. Silent routers are shown as `(no reply)`. |
 | `--quiz` | Five questions about your own network (address, network address, gateway, usable hosts, mask). When not run in a terminal it prints the answers instead. |
 | `--course` | A map from each networking topic to the command that demonstrates it. |
@@ -319,12 +373,12 @@ Each line of `ip -4 route` is printed with an explanation. With a destination, N
 
 | Command | What it does |
 |---|---|
-| `--quick` | One line, about two seconds: `OK` (with latency, loss and interface), `DEGRADED` (router replies, internet does not) or `FAIL`. Exit codes `0`, `10`, `20`. |
+| `--quick` | One line, about two seconds: `OK` (with latency, loss and interface), `DEGRADED` (router replies but the internet does not, or the internet answers but some pings are lost) or `FAIL`. Exit codes `0`, `10`, `20`. |
 | `--history` | The last 20 saved runs: time, score, grade, latency, loss, interface. |
 | `--compare [N]` | The last N runs side by side, and whether the score improved, dropped or stayed the same since the first of them. |
-| `--report FILE` | Writes a Markdown report. MAC addresses, BSSIDs and the public IP are left out. |
+| `--report FILE` | Writes a Markdown report. MAC addresses, BSSIDs and the public IP are left out. The folder must already exist; if the file cannot be written NetScope exits `1`. |
 
-Normal runs append one line to `~/.local/share/netscope/history.jsonl` (or `$XDG_DATA_HOME/netscope/`). The file is trimmed to its last 1000 lines when it passes 5000. **The record includes the Wi-Fi network name.**
+Normal runs append one line to `~/.local/share/netscope/history.jsonl` (or `$XDG_DATA_HOME/netscope/`). The file is trimmed to its last 1000 lines when it passes 5000. The folder is created private (mode `700`). **The record includes the Wi-Fi network name.**
 
 > A `--report` file still contains the Wi-Fi name, your private IPv4 address and the diagnosis text. Read it before sharing it publicly.
 
@@ -597,7 +651,8 @@ The score starts at **100** and points are deducted for each problem found.
 | `--mtu`, `--topology` | Pings or a `tracepath` toward the host you name (`--topology` defaults to 8.8.8.8). |
 | `--dns`, `--tls`, `--handshake` | Ordinary DNS queries or one connection to the host you name. |
 | `--nat` | One request to Cloudflare's trace endpoint to learn your public address. |
-| `--arp`, `--routes` (no DEST), `--ports`, `--dhcp`, `--channels`, `--subnet`, `--glossary`, `--quiz`, `--course`, `--history`, `--compare` | Nothing is sent. |
+| `--learn`, `--osi` | The same as a normal run (they run the normal scan first). |
+| `--arp`, `--routes` (no DEST), `--ports`, `--dhcp`, `--channels`, `--subnet`, `--glossary`, `--roadmap`, `--quiz`, `--course`, `--history`, `--compare` | Nothing is sent. |
 
 No mode scans other devices or probes their ports.
 
@@ -615,6 +670,8 @@ No mode scans other devices or probes their ports.
 - Results are a snapshot. Run it a few times, at different moments, before drawing conclusions.
 - Targets (1.1.1.1, 8.8.8.8, Cloudflare) need outbound access. A firewall or restricted network can make them look like failures.
 - The history file stores your Wi-Fi network name.
+- `--learn` and `--osi` run the full scan first, so they need `ip` and take about 5 seconds; their exit code is the health score.
+- Two different lab modes cannot be combined in one command (exit `2`).
 - The 2.5 `--walk` and `--routes` changes were tested against simulated command output; please report differences you see on real networks.
 
 ---
@@ -649,7 +706,13 @@ That is current traffic through your interface while idle, not your connection s
 Drops are counted since boot and are a small share of traffic. The score is based on live tests and on errors that appear **during** the scan.
 
 **Which learning tool should I start with?**
-Run `./netscope.sh --course` for the map, then `--learn --osi`, `--subnet`, `--routes 8.8.8.8` and `--walk 8.8.8.8`. Use `--glossary` whenever a term is unfamiliar.
+Run `./netscope.sh --roadmap` for the plan and `--course` for the map, then `--learn 1` and on through the stages, with `--osi`, `--subnet`, `--routes 8.8.8.8` and `--walk 8.8.8.8` alongside. Use `--glossary` whenever a term is unfamiliar.
+
+**Why does `--subnet` show no broadcast address for a /31 or /32?**
+A `/31` is a point-to-point link (RFC 3021) where both addresses are usable, so nothing is reserved for broadcast. A `/32` is a single address. NetScope says so instead of subtracting 2.
+
+**Why did `--learn 5` or two modes in one command stop with exit status 2?**
+`--learn` only accepts the stages 1 to 4, and since 2.7 NetScope refuses to guess which of two lab modes you meant. Run them one after the other.
 
 **Do the learning tools send anything unusual?**
 No. See [Network contacts](#network-contacts). None of them scans other devices or probes ports.
@@ -671,4 +734,4 @@ It only contacts standard test targets (the router, public DNS servers, Cloudfla
 
 ---
 
-*NetScope 2.5 · Page last updated 2026-10-20*
+*NetScope 2.7 · Page last updated 2026-11-18*
